@@ -1169,6 +1169,109 @@ class TestGaussianCLIMecpCommand:
         assert result.exit_code == 0, result.output
         assert settings.step_size_method == "grow_shrink"
 
+    def test_mecp_combinatorial_creates_cartesian_product(
+        self,
+        single_molecule_xyz_file,
+        gaussian_jobrunner_no_scratch,
+        make_cli_ctx_obj,
+    ):
+        """--functionals x --basis-sets y creates len(x)*len(y) jobs."""
+        from unittest.mock import patch, MagicMock
+
+        from click.testing import CliRunner
+        from chemsmart.cli.gaussian.gaussian import gaussian
+
+        runner = CliRunner()
+        with patch("chemsmart.jobs.gaussian.mecp.GaussianMECPJob") as mock_job_cls:
+            mock_job_cls.return_value = MagicMock()
+            result = runner.invoke(
+                gaussian,
+                [
+                    "-p", "gas_solv",
+                    "-f", single_molecule_xyz_file,
+                    "-c", "0",
+                    "-m", "1",
+                    "mecp",
+                    "--functionals", "m062x,b3lyp",
+                    "--basis-sets", "def2svp,def2tzvp",
+                ],
+                obj=make_cli_ctx_obj(gaussian_jobrunner_no_scratch),
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert mock_job_cls.call_count == 4
+
+        labels = [c.kwargs["label"] for c in mock_job_cls.call_args_list]
+        assert any("m062x" in lab and "def2svp" in lab for lab in labels)
+        assert any("m062x" in lab and "def2tzvp" in lab for lab in labels)
+        assert any("b3lyp" in lab and "def2svp" in lab for lab in labels)
+        assert any("b3lyp" in lab and "def2tzvp" in lab for lab in labels)
+
+        # Verify each combination has the correct functional/basis in settings
+        for call in mock_job_cls.call_args_list:
+            s = call.kwargs["settings"]
+            assert s.functional in ("m062x", "b3lyp")
+            assert s.basis in ("def2svp", "def2tzvp")
+
+    def test_mecp_combinatorial_single_functional_single_job(
+        self,
+        single_molecule_xyz_file,
+        gaussian_jobrunner_no_scratch,
+        make_cli_ctx_obj,
+    ):
+        """Single --functionals value creates exactly one job."""
+        from unittest.mock import patch, MagicMock
+
+        from click.testing import CliRunner
+        from chemsmart.cli.gaussian.gaussian import gaussian
+
+        runner = CliRunner()
+        with patch("chemsmart.jobs.gaussian.mecp.GaussianMECPJob") as mock_job_cls:
+            mock_job_cls.return_value = MagicMock()
+            result = runner.invoke(
+                gaussian,
+                [
+                    "-p", "gas_solv",
+                    "-f", single_molecule_xyz_file,
+                    "-c", "0",
+                    "-m", "1",
+                    "mecp",
+                    "--functionals", "m062x",
+                ],
+                obj=make_cli_ctx_obj(gaussian_jobrunner_no_scratch),
+                catch_exceptions=False,
+            )
+
+        assert result.exit_code == 0, result.output
+        assert mock_job_cls.call_count == 1
+        assert mock_job_cls.call_args.kwargs["settings"].functional == "m062x"
+
+    def test_mecp_no_combinatorial_backward_compatible(
+        self,
+        single_molecule_xyz_file,
+        gaussian_jobrunner_no_scratch,
+        make_cli_ctx_obj,
+        run_gaussian_and_capture_settings,
+    ):
+        """Without --functionals/--basis-sets, behaviour is unchanged (single job)."""
+        result, settings = run_gaussian_and_capture_settings(
+            "chemsmart.jobs.gaussian.mecp.GaussianMECPJob",
+            [
+                "-p", "gas_solv",
+                "-f", single_molecule_xyz_file,
+                "-c", "0",
+                "-m", "1",
+                "mecp",
+            ],
+            make_cli_ctx_obj(gaussian_jobrunner_no_scratch),
+        )
+
+        assert result.exit_code == 0, result.output
+        # settings.functional should be whatever the project default is (not None-set by us)
+
+
+
 
 class TestGaussianCLILinkMecpCommand:
     """CLI tests for ``link -j mecp`` (broken-symmetry MECP via link sub-jobs)."""

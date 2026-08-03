@@ -80,6 +80,8 @@ homepage = "https://github.com/xinglong-zhang/chemsmart/"
 
 [project.scripts]
 chemsmart = "chemsmart.cli.main:main"
+chemsmart-mecp-summary = "chemsmart.scripts.mecp_summary:entry_point"
+chemsmart-validate-angew-mecp = "chemsmart.scripts.validate_angew_mecp:entry_point"
 
 [tool.setuptools.packages.find]
 exclude = [".github"]

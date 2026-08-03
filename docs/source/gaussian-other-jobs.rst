@@ -187,6 +187,22 @@ MECP Options
       -  1.0×10⁻³ Bohr
       -  Finite-difference step size used by ``--verify-seam-minimum`` for the numerical Hessian.
 
+   -  -  ``--functionals``
+      -  str
+      -  None
+      -  Comma-separated list of DFT functionals for combinatorial MECP benchmarking
+         (e.g. ``m062x,b3lyp,tpssh``). When combined with ``--basis-sets``, creates a
+         Cartesian-product set of MECP jobs — one per (functional, basis) combination.
+         Each job label is suffixed with ``_{functional}_{basis}``. See
+         :ref:`combinatorial-mecp-benchmarking` below.
+
+   -  -  ``--basis-sets``
+      -  str
+      -  None
+      -  Comma-separated list of basis sets for combinatorial MECP benchmarking
+         (e.g. ``def2svp,def2tzvp``). See ``--functionals`` and
+         :ref:`combinatorial-mecp-benchmarking` below.
+
 .. _convergence-presets:
 
 Convergence Presets
@@ -430,6 +446,77 @@ Results are written to ``<label>_seam_check.log``:
      mode    1: +1.234567e-03
      mode    2: +2.345678e-03
      ...
+
+.. _combinatorial-mecp-benchmarking:
+
+Combinatorial Benchmarking
+==========================
+
+The ``--functionals`` and ``--basis-sets`` options allow running a **Cartesian-product
+set of MECP jobs** in a single command — ideal for systematic benchmarking across
+DFT methods. Each combination gets its own settings copy (functional and basis set
+overridden) and a unique label suffix.
+
+**Label format:** ``{base_label}_{functional}_{basis}`` (plus ``_idx{N}`` in
+multi-molecule mode).
+
+**Example — 2 functionals × 2 basis sets = 4 MECP jobs:**
+
+.. code:: bash
+
+   chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 mecp \
+       --functionals m062x,b3lyp \
+       --basis-sets def2svp,def2tzvp
+
+This creates four jobs with labels:
+
+- ``structure_m062x_def2svp``
+- ``structure_m062x_def2tzvp``
+- ``structure_b3lyp_def2svp``
+- ``structure_b3lyp_def2tzvp``
+
+**Vary only functionals (basis set from project settings):**
+
+.. code:: bash
+
+   chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 mecp \
+       --functionals m062x,tpssh,b3lyp,m06l
+
+**Vary only basis sets (functional from project settings):**
+
+.. code:: bash
+
+   chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 mecp \
+       --basis-sets def2svp,def2tzvp,def2qzvpp
+
+**Combine with other MECP options:**
+
+.. code:: bash
+
+   chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 mecp \
+       --functionals m062x,b3lyp \
+       --basis-sets def2tzvp \
+       --convergence tight \
+       --max-steps 200
+
+.. note::
+
+   When neither ``--functionals`` nor ``--basis-sets`` is given, a single MECP job is
+   created using the project's default functional and basis set — fully backward
+   compatible with pre-existing workflows.
+
+**Aggregating results**
+
+After the jobs finish, use the ``chemsmart-mecp-summary`` script to collect all
+``*_report.log`` files in a directory and produce a CSV / Markdown summary table:
+
+.. code:: bash
+
+   chemsmart-mecp-summary -d /path/to/jobs -o results.csv --markdown results.md
+
+The summary includes convergence status, step count, final :math:`E_A`, :math:`E_B`,
+and :math:`\Delta E` (in both Hartree and kcal/mol) for each (functional, basis)
+combination.
 
 Basic Usage
 ===========

@@ -170,6 +170,28 @@ logger = logging.getLogger(__name__)
     help="Finite-difference step size (Bohr) for the numerical Hessian used in "
     "--verify-seam-minimum (default: 1e-3).",
 )
+@click.option(
+    "--functionals",
+    type=str,
+    default=None,
+    help=(
+        "Comma-separated list of DFT functionals for combinatorial MECP "
+        "benchmarking (e.g., 'm062x,tpssh,b3lyp'). When provided together "
+        "with --basis-sets, a Cartesian-product set of MECP jobs is created, "
+        "one per (functional, basis) combination. Each job label is suffixed "
+        "with '_{functional}_{basis}'."
+    ),
+)
+@click.option(
+    "--basis-sets",
+    type=str,
+    default=None,
+    help=(
+        "Comma-separated list of basis sets for combinatorial MECP "
+        "benchmarking (e.g., 'def2svp,def2tzvp'). See --functionals for "
+        "combination behaviour."
+    ),
+)
 @click.pass_context
 def mecp(
     ctx,
@@ -196,6 +218,8 @@ def mecp(
     step_size_max,
     verify_seam_minimum,
     hess_step_size,
+    functionals,
+    basis_sets,
     skip_completed,
     **kwargs,
 ):
@@ -309,26 +333,70 @@ def mecp(
     if hess_step_size is not None:
         mecp_settings.hess_step_size = hess_step_size
 
-    # get molecule
-    molecules = ctx.obj[
-        "molecules"
-    ]  # use all molecules as a list for crest jobs
-    molecule = molecules[-1]  # get last molecule from list of molecules
-
-    # get label for the job
+    # get molecules
+    molecules = ctx.obj["molecules"]
+    molecule_indices = ctx.obj.get("molecule_indices")
     label = ctx.obj["label"]
 
     logger.debug(f"Label for job: {label}")
-
     logger.info(f"MECP job settings from project: {mecp_settings.__dict__}")
 
     from chemsmart.jobs.gaussian.mecp import GaussianMECPJob
 
-    return GaussianMECPJob(
-        molecule=molecule,
-        settings=mecp_settings,
-        label=label,
-        jobrunner=jobrunner,
-        skip_completed=skip_completed,
-        **kwargs,
+    # --- Combinatorial mode ---
+    # Parse comma-separated lists; None means "use whatever is already in
+    # mecp_settings" (single job, backward-compatible).
+    func_list = (
+        [f.strip() for f in functionals.split(",") if f.strip()]
+        if functionals
+        else [None]
     )
+    basis_list = (
+        [b.strip() for b in basis_sets.split(",") if b.strip()]
+        if basis_sets
+        else [None]
+    )
+
+    # Multi-molecule handling (mirrors opt.py pattern).
+    use_multiple = len(molecules) > 1 and molecule_indices is not None
+
+    jobs = []
+    for func in func_list:
+        for basis in basis_list:
+            for m_idx, molecule in enumerate(molecules):
+                if not use_multiple and m_idx < len(molecules) - 1:
+                    continue  # single-molecule mode: only last molecule
+
+                # Per-combination settings copy
+                combo_settings = mecp_settings.copy()
+                if func is not None:
+                    combo_settings.functional = func
+                if basis is not None:
+                    combo_settings.basis = basis
+
+                # Per-combination label suffix
+                combo_label = label
+                if func is not None:
+                    combo_label += f"_{func}"
+                if basis is not None:
+                    combo_label += f"_{basis}"
+                if use_multiple:
+                    combo_label += f"_idx{molecule_indices[m_idx]}"
+
+                mol = molecule.copy()
+                logger.info(f"Creating MECP job: {combo_label}")
+
+                jobs.append(
+                    GaussianMECPJob(
+                        molecule=mol,
+                        settings=combo_settings,
+                        label=combo_label,
+                        jobrunner=jobrunner,
+                        skip_completed=skip_completed,
+                        **kwargs,
+                    )
+                )
+
+    if len(jobs) == 1:
+        return jobs[0]
+    return jobs
