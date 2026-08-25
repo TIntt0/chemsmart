@@ -55,6 +55,14 @@ Distances, Angles, and Dihedrals
    dist_matrix = mol.distance_matrix
    print(f"Distance matrix shape: {dist_matrix.shape}")
 
+The example prints::
+
+   Distance 1-2: 0.966 Å
+   Angle 2-1-3: 103.8°
+   Dihedral 1-2-3-4: 0.0°
+   All distances: 3 pairs
+   Distance matrix shape: (3, 3)
+
 :meth:`~chemsmart.io.molecules.structure.Molecule.get_distance(idx1, idx2)` Calculate the distance between two atoms
 (1-based indices).
 
@@ -73,6 +81,9 @@ angle between four atoms (1-based indices).
 
 -  ``idx1``, ``idx2``, ``idx3``, ``idx4`` (int) — Atom indices defining the dihedral (1-based).
 -  Returns: ``float`` — Dihedral angle in degrees.
+
+Invalid indices (zero, negative, out of range, or non-integer) raise ``IndexError`` or ``TypeError``. Angles with a
+zero-length arm and dihedrals formed from zero-length or collinear vectors are undefined and raise ``ValueError``.
 
 :meth:`~chemsmart.io.molecules.structure.Molecule.get_all_distances()` Compute all pairwise interatomic distances.
 

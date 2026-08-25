@@ -952,15 +952,28 @@ class Molecule:
         Calculate the distance between two points.
         Use 1-based indexing for idx1 and idx2.
         """
+        self._validate_geometry_indices(idx1, idx2)
         return np.linalg.norm(
             self.positions[idx1 - 1] - self.positions[idx2 - 1]
         )
+
+    def _validate_geometry_indices(self, *indices):
+        """Validate public, 1-based atom indices used by geometry methods."""
+        for idx in indices:
+            if isinstance(idx, bool) or not isinstance(idx, (int, np.integer)):
+                raise TypeError("Atom indices must be integers.")
+            if idx < 1 or idx > self.num_atoms:
+                raise IndexError(
+                    f"Atom index {idx} is outside the valid 1-based range "
+                    f"1..{self.num_atoms}."
+                )
 
     def get_angle(self, idx1, idx2, idx3):
         """
         Calculate the angle between three points.
         Use 1-based indexing for idx1, idx2, and idx3.
         """
+        self._validate_geometry_indices(idx1, idx2, idx3)
         return self.get_angle_from_positions(
             self.positions[idx1 - 1],
             self.positions[idx2 - 1],
@@ -973,7 +986,13 @@ class Molecule:
         """
         v1 = position1 - position2
         v2 = position3 - position2
-        cos_theta = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+        denominator = np.linalg.norm(v1) * np.linalg.norm(v2)
+        if np.isclose(denominator, 0.0):
+            raise ValueError(
+                "Angle is undefined when either vector has zero length."
+            )
+        cos_theta = np.dot(v1, v2) / denominator
+        cos_theta = np.clip(cos_theta, -1.0, 1.0)
         return np.degrees(np.arccos(cos_theta))
 
     def get_dihedral(self, idx1, idx2, idx3, idx4):
@@ -982,6 +1001,7 @@ class Molecule:
         points, about bond formed by idx2 and idx3.
         Use 1-based indexing for idx1, idx2, idx3, and idx4.
         """
+        self._validate_geometry_indices(idx1, idx2, idx3, idx4)
         return self.get_dihedral_from_positions(
             self.positions[idx1 - 1],
             self.positions[idx2 - 1],
@@ -1000,8 +1020,17 @@ class Molecule:
         v3 = position4 - position3
         n1 = np.cross(v1, v2)
         n2 = np.cross(v2, v3)
+        if (
+            np.isclose(np.linalg.norm(v2), 0.0)
+            or np.isclose(np.linalg.norm(n1), 0.0)
+            or np.isclose(np.linalg.norm(n2), 0.0)
+        ):
+            raise ValueError(
+                "Dihedral is undefined for zero-length or collinear vectors."
+            )
         x = np.dot(n1, n2)
-        y = np.dot(np.cross(n1, v2), n2)
+        v2_unit = v2 / np.linalg.norm(v2)
+        y = np.dot(np.cross(n1, v2_unit), n2)
         return np.degrees(np.arctan2(y, x))
 
     def copy(self):
@@ -2109,9 +2138,9 @@ class Molecule:
         Write coordinates in Gaussian format.
         """
         assert self.symbols is not None, "Symbols to write should not be None!"
-        assert (
-            self.positions is not None
-        ), "Positions to write should not be None!"
+        assert self.positions is not None, (
+            "Positions to write should not be None!"
+        )
         if self.frozen_atoms is None or len(self.frozen_atoms) == 0:
             for i, (s, (x, y, z)) in enumerate(
                 zip(self.chemical_symbols, self.positions)
@@ -2136,9 +2165,9 @@ class Molecule:
             return
         else:
             logger.debug(f"Writing PBC conditions: {self.pbc_conditions}")
-            assert (
-                self.translation_vectors is not None
-            ), "Translation vectors should not be None when PBC conditions are given!"
+            assert self.translation_vectors is not None, (
+                "Translation vectors should not be None when PBC conditions are given!"
+            )
             for i in range(len(self.translation_vectors)):
                 f.write(
                     f"TV    {self.translation_vectors[i][0]:15.10f} "
@@ -2151,9 +2180,9 @@ class Molecule:
         Write coordinates in ORCA format.
         """
         assert self.symbols is not None, "Symbols to write should not be None!"
-        assert (
-            self.positions is not None
-        ), "Positions to write should not be None!"
+        assert self.positions is not None, (
+            "Positions to write should not be None!"
+        )
 
         # if self.frozen_atoms is None:
         # commented above out since with frozen atom
@@ -3773,9 +3802,9 @@ class QMMMMolecule(Molecule):
     def _write_gaussian_coordinates(self, f):
 
         assert self.symbols is not None, "Symbols to write should not be None!"
-        assert (
-            self.positions is not None
-        ), "Positions to write should not be None!"
+        assert self.positions is not None, (
+            "Positions to write should not be None!"
+        )
         from chemsmart.jobs.gaussian.settings import GaussianQMMMJobSettings
 
         if self.bonded_atoms is None:
