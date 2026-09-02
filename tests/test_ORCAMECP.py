@@ -1,10 +1,14 @@
 """Tests for native ORCA SurfCrossOpt support."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
+from click.testing import CliRunner
 
+from chemsmart.cli.orca.orca import orca
+from chemsmart.cli.sub import sub
 from chemsmart.io.orca.output import ORCAOutput
 from chemsmart.jobs.orca.mecp import ORCAMECPJob
 from chemsmart.jobs.orca.settings import ORCAMECPJobSettings
@@ -193,6 +197,154 @@ def test_cli_rejects_equal_multiplicities(
         ],
     )
     assert result.exit_code != 0
+
+
+@pytest.mark.parametrize(
+    "m1,m2,expected",
+    [
+        ("0", "4", "range x>=1"),
+        ("-1", "4", "range x>=1"),
+        ("6", "0", "range x>=1"),
+        ("6", "-1", "range x>=1"),
+    ],
+)
+def test_cli_rejects_nonpositive_multiplicities(
+    single_molecule_xyz_file,
+    run_orca_and_capture_settings,
+    m1,
+    m2,
+    expected,
+):
+    result, _ = run_orca_and_capture_settings(
+        "chemsmart.jobs.orca.mecp.ORCAMECPJob",
+        [
+            "-p",
+            "test",
+            "-f",
+            single_molecule_xyz_file,
+            "-c",
+            "1",
+            "mecp",
+            "--m1",
+            m1,
+            "--m2",
+            m2,
+        ],
+    )
+    assert result.exit_code != 0
+    assert expected in result.output
+
+
+@pytest.mark.parametrize("args", [["--m1", "6"], ["--m2", "4"], []])
+def test_cli_requires_both_multiplicities(
+    single_molecule_xyz_file, run_orca_and_capture_settings, args
+):
+    result, _ = run_orca_and_capture_settings(
+        "chemsmart.jobs.orca.mecp.ORCAMECPJob",
+        [
+            "-p",
+            "test",
+            "-f",
+            single_molecule_xyz_file,
+            "-c",
+            "1",
+            "mecp",
+            *args,
+        ],
+    )
+    assert result.exit_code != 0
+    assert "Missing option" in result.output
+
+
+def test_orca_short_a_appends_label(
+    single_molecule_xyz_file, orca_jobrunner_no_scratch
+):
+    with patch("chemsmart.jobs.orca.mecp.ORCAMECPJob") as job_class:
+        job_class.return_value = object()
+        result = CliRunner().invoke(
+            orca,
+            [
+                "-p",
+                "test",
+                "-f",
+                single_molecule_xyz_file,
+                "-a",
+                "testnumfreq",
+                "-c",
+                "1",
+                "mecp",
+                "--m1",
+                "6",
+                "--m2",
+                "4",
+                "--mode",
+                "numfreq",
+            ],
+            obj={"jobrunner": orca_jobrunner_no_scratch},
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    call = job_class.call_args.kwargs
+    assert call["label"].endswith("_testnumfreq")
+    assert call["settings"].aux_basis is None
+
+
+def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
+    xyz = Path(
+        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
+    ).resolve()
+    server = orca_jobrunner_no_scratch.server
+    with (
+        patch(
+            "chemsmart.cli.sub.Server.from_servername",
+            return_value=server,
+        ),
+        patch.object(server, "submit") as submit,
+        patch("chemsmart.jobs.orca.mecp.ORCAMECPJob") as job_class,
+    ):
+        job_class.return_value = MagicMock()
+        result = CliRunner().invoke(
+            sub,
+            [
+                "--server",
+                "cuhk",
+                "--test",
+                "orca",
+                "-p",
+                "test",
+                "-f",
+                str(xyz),
+                "-a",
+                "testnumfreq",
+                "-c",
+                "1",
+                "-x",
+                "B3LYP",
+                "-b",
+                "TZVP",
+                "mecp",
+                "--m1",
+                "3",
+                "--m2",
+                "1",
+                "--mode",
+                "numfreq",
+            ],
+            catch_exceptions=False,
+        )
+
+    assert result.exit_code == 0, result.output
+    submitted_args = submit.call_args.kwargs["cli_args"]
+    for option, value in (
+        ("--append-label", "testnumfreq"),
+        ("--m1", "3"),
+        ("--m2", "1"),
+        ("--mode", "numfreq"),
+    ):
+        index = submitted_args.index(option)
+        assert submitted_args[index + 1] == value
+    assert "--aux-basis" not in submitted_args
 
 
 def test_cli_m1_m2_options(

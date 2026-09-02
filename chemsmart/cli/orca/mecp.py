@@ -31,14 +31,14 @@ logger = logging.getLogger(__name__)
 @click_orca_solvent_options
 @click.option(
     "--m1",
-    type=int,
+    type=click.IntRange(min=1),
     default=None,
     required=True,
     help="PES1 spin multiplicity; written to the * xyz line (required).",
 )
 @click.option(
     "--m2",
-    type=int,
+    type=click.IntRange(min=1),
     default=None,
     required=True,
     help="PES2 spin multiplicity; written to %mecp Mult (required).",

@@ -111,9 +111,9 @@ Method and Basis Set Options
       -  string
       -  Basis set
 
-   -  -  ``-a, --aux-basis``
+   -  -  ``--aux-basis``
       -  string
-      -  Auxiliary basis set
+      -  Auxiliary basis set (``-a`` is reserved for ``--append-label``)
 
    -  -  ``-e, --extrapolation-basis``
       -  string
