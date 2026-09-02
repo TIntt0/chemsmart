@@ -69,7 +69,9 @@ logger = logging.getLogger(__name__)
 @click.option("--casscf-nel", type=int, default=None)
 @click.option("--casscf-norb", type=int, default=None)
 @click.option(
-    "--casscf-mult", default=None, help="Comma-separated CASSCF multiplicities."
+    "--casscf-mult",
+    default=None,
+    help="Comma-separated CASSCF multiplicities.",
 )
 @click.option(
     "--casscf-nroots", default=None, help="Comma-separated CASSCF root counts."

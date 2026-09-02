@@ -2252,14 +2252,15 @@ class ORCAMECPJobSettings(ORCAJobSettings):
             base = re.sub(r"^!\s*", "! Opt ", base, count=1)
         if not re.search(r"\bSurfCrossOpt\b", base, re.IGNORECASE):
             base = re.sub(
-                r"\bOpt\b", "Opt SurfCrossOpt", base, count=1,
+                r"\bOpt\b",
+                "Opt SurfCrossOpt",
+                base,
+                count=1,
                 flags=re.IGNORECASE,
             )
         # Strip any Freq/NumFreq inherited from project settings —
         # SurfCrossOpt + separate Freq/NumFreq is not meaningful.
-        base = re.sub(
-            r"\bSurfCrossNumFreq\b", "", base, flags=re.IGNORECASE
-        )
+        base = re.sub(r"\bSurfCrossNumFreq\b", "", base, flags=re.IGNORECASE)
         base = re.sub(r"\bFreq\b", "", base, flags=re.IGNORECASE)
         base = re.sub(r"\bNumFreq\b", "", base, flags=re.IGNORECASE)
         if self.mode == "numfreq":

@@ -60,9 +60,7 @@ def test_feo_official_example_input(
     settings.maxiter = 200
     settings.broken_sym = [1, 1]
     settings.validate()
-    feo_xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/feo_plus.xyz"
-    ).resolve()
+    feo_xyz = Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
     job = ORCAMECPJob.from_filename(
         filename=str(feo_xyz),
         settings=settings,
@@ -102,16 +100,14 @@ def test_casscf_options_are_written(
 
 def test_real_output_markers_are_parsed(tmp_path):
     output = tmp_path / "feo_mecp.out"
-    output.write_text(
-        """|  1> ! B3LYP TZVP Opt SurfCrossOpt SurfCrossNumFreq
+    output.write_text("""|  1> ! B3LYP TZVP Opt SurfCrossOpt SurfCrossNumFreq
 |  2> %mecp Mult 4
 FINAL SINGLE POINT ENERGY     -1340.123456789
 FINAL SINGLE POINT ENERGY     -1340.123454391
 Energy difference between both states      -0.000002398
 THE OPTIMIZATION HAS CONVERGED
 ****ORCA TERMINATED NORMALLY****
-"""
-    )
+""")
     parsed = ORCAOutput(str(output)).mecp_result
     assert parsed.converged
     assert parsed.normal_termination
@@ -122,9 +118,7 @@ THE OPTIMIZATION HAS CONVERGED
 
 
 def test_real_feo_stationary_point_geometry():
-    output = Path(
-        "tests/data/ORCATests/outputs/feo_plus_mecp.out"
-    ).resolve()
+    output = Path("tests/data/ORCATests/outputs/feo_plus_mecp.out").resolve()
     parsed = ORCAOutput(str(output)).mecp_result
     assert parsed.converged
     assert parsed.normal_termination
@@ -142,9 +136,7 @@ def test_numfreq_rejects_two_atom_system(orca_jobrunner_no_scratch):
     ):
         ORCAMECPJob.from_filename(
             filename=str(
-                Path(
-                    "tests/data/ORCATests/inputs/xyz/feo_plus.xyz"
-                ).resolve()
+                Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
             ),
             settings=mecp_settings(mode="numfreq"),
             label="feo_numfreq",
@@ -155,9 +147,7 @@ def test_numfreq_rejects_two_atom_system(orca_jobrunner_no_scratch):
 def test_orca_official_ch3o_ch2oh_numfreq_input(
     tmpdir, orca_jobrunner_no_scratch
 ):
-    xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
-    ).resolve()
+    xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
     settings = mecp_settings(
         charge=1,
         multiplicity_a=3,
@@ -291,9 +281,7 @@ def test_orca_short_a_appends_label(
 
 
 def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
-    xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
-    ).resolve()
+    xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
     server = orca_jobrunner_no_scratch.server
     with (
         patch(
