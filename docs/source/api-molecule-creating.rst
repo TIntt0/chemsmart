@@ -87,26 +87,22 @@ Query PubChem directly by name, CID, or SMILES string:
 
 .. code:: python
 
-   # By CID (Compound ID) — unambiguous, no fallback errors
+   # Look up a molecule by PubChem CID
    mol = Molecule.from_pubchem("2244")
    print(mol.chemical_formula)   # C9H8O4
 
-   # By SMILES string — unambiguous, no fallback errors
+   # Look up a molecule by SMILES
    mol = Molecule.from_pubchem("CC(=O)OC1=CC=CC=C1C(=O)O")
    print(mol.chemical_formula)   # C9H8O4
 
-   # By compound name — CHEMSMART tries SMILES first (which fails for a
-   # plain name) and then falls back to name search. The intermediate
-   # "400 PUGREST.BadRequest" message for the SMILES attempt is normal
-   # and the result is still returned correctly:
+   # Look up a molecule by name
    mol = Molecule.from_pubchem("aspirin")
    print(mol.chemical_formula)   # C9H8O4
 
 .. note::
 
-   PubChem queries require an **internet connection** and the ``tenacity`` Python package (``pip install tenacity``). If
-   a 3D conformer is unavailable, CHEMSMART automatically falls back to the 2D structure and generates 3D coordinates
-   using RDKit (``pip install rdkit``).
+   PubChem queries require an **internet connection**. If a 3D conformer is unavailable, CHEMSMART automatically falls
+   back to the 2D structure and generates 3D coordinates using RDKit.
 
 .. tip::
 
@@ -137,6 +133,7 @@ CHEMSMART provides seamless conversion from popular chemistry libraries:
    from rdkit import Chem
    from rdkit.Chem import AllChem
    rdkit_mol = Chem.MolFromSmiles("CCO")
+   rdkit_mol = Chem.AddHs(rdkit_mol)
    AllChem.EmbedMolecule(rdkit_mol)
    mol = Molecule.from_rdkit_mol(rdkit_mol)
    print(mol.chemical_formula)   # C2H6O

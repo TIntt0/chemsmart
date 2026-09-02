@@ -64,10 +64,6 @@ index and return a new molecule.
 -  Returns: :class:`Molecule` — New molecule with the specified atoms removed.
 -  Raises: ``ValueError`` if any index is out of range or removing all atoms would leave an empty molecule.
 
-.. warning::
-
-   CHEMSMART uses **1-based indexing** to match most molecular visualization software, unlike Python's 0-based indexing.
-
 ****************************
  Writing Molecules to Files
 ****************************
