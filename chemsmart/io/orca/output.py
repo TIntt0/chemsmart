@@ -233,7 +233,7 @@ class ORCAOutput(ORCAFileMixin):
         if gap is None and state_1 is not None and state_2 is not None:
             gap = state_1 - state_2
         try:
-            structure = self.final_structure
+            structure = self._get_mecp_stationary_point_structure()
         except (IndexError, ValueError):
             structure = None
         return ORCAMECPResult(
@@ -248,6 +248,44 @@ class ORCAOutput(ORCAFileMixin):
             ),
             energy_gap_history=gaps,
         )
+
+    def _get_mecp_stationary_point_structure(self):
+        """Return the geometry at ORCA's converged MECP stationary point.
+
+        A converged ``SurfCrossOpt`` output prints the stationary-point
+        geometry and then performs one final energy evaluation on each PES.
+        Consequently, the last Cartesian block in the file belongs to PES2
+        and must not be used as the optimized MECP geometry.
+        """
+        marker = "FINAL ENERGY EVALUATION AT THE STATIONARY POINT"
+        header = "CARTESIAN COORDINATES (ANGSTROEM)"
+        pattern = re.compile(standard_coord_pattern)
+
+        marker_indices = [
+            i for i, line in enumerate(self.contents) if marker in line
+        ]
+        if not marker_indices:
+            raise ValueError("No MECP stationary-point geometry was found.")
+
+        for line_index in range(marker_indices[-1] + 1, len(self.contents)):
+            if header not in self.contents[line_index]:
+                continue
+            coordinate_lines = []
+            for line in self.contents[line_index + 1 :]:
+                if pattern.match(line):
+                    coordinate_lines.append(line)
+                elif coordinate_lines:
+                    break
+            if coordinate_lines:
+                structure = CoordinateBlock(
+                    coordinate_block=coordinate_lines
+                ).molecule
+                # A crossing point has two electronic energies.  Attaching
+                # either PES value to the geometry would be ambiguous.
+                structure.energy = None
+                return structure
+
+        raise ValueError("No MECP stationary-point geometry was found.")
 
     @cached_property
     def input_coordinates_block(self):

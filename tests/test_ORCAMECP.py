@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from chemsmart.io.orca.output import ORCAOutput
@@ -114,6 +115,62 @@ THE OPTIMIZATION HAS CONVERGED
     assert parsed.state_2_energy == pytest.approx(-1340.123454391)
     assert parsed.energy_gap == pytest.approx(-0.000002398)
     assert parsed.numfreq_requested
+
+
+def test_real_feo_stationary_point_geometry():
+    output = Path(
+        "tests/data/ORCATests/outputs/feo_plus_mecp.out"
+    ).resolve()
+    parsed = ORCAOutput(str(output)).mecp_result
+    assert parsed.converged
+    assert parsed.normal_termination
+    assert parsed.final_structure.energy is None
+    fe_o_distance = np.linalg.norm(
+        parsed.final_structure.positions[0]
+        - parsed.final_structure.positions[1]
+    )
+    assert fe_o_distance == pytest.approx(1.993648, abs=1e-6)
+
+
+def test_numfreq_rejects_two_atom_system(orca_jobrunner_no_scratch):
+    with pytest.raises(
+        ValueError, match="SurfCrossNumFreq requires at least 3 atoms"
+    ):
+        ORCAMECPJob.from_filename(
+            filename=str(
+                Path(
+                    "tests/data/ORCATests/inputs/xyz/feo_plus.xyz"
+                ).resolve()
+            ),
+            settings=mecp_settings(mode="numfreq"),
+            label="feo_numfreq",
+            jobrunner=orca_jobrunner_no_scratch,
+        )
+
+
+def test_orca_official_ch3o_ch2oh_numfreq_input(
+    tmpdir, orca_jobrunner_no_scratch
+):
+    xyz = Path(
+        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
+    ).resolve()
+    settings = mecp_settings(
+        charge=1,
+        multiplicity_a=3,
+        multiplicity_b=1,
+        mode="numfreq",
+    )
+    job = ORCAMECPJob.from_filename(
+        filename=str(xyz),
+        settings=settings,
+        label="ch3o_ch2oh_mecp",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    ORCAInputWriter(job=job).write(target_directory=tmpdir)
+    content = Path(str(tmpdir), "ch3o_ch2oh_mecp.inp").read_text()
+    assert "Opt SurfCrossOpt SurfCrossNumFreq" in content
+    assert "%mecp\n  Mult 1\nend" in content
+    assert "* xyz 1 3" in content
 
 
 def test_cli_rejects_equal_multiplicities(

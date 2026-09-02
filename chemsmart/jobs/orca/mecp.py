@@ -59,6 +59,11 @@ class ORCAMECPJob(ORCAJob):
             jobrunner=jobrunner,
             **kwargs,
         )
+        if self.settings.mode == "numfreq" and len(self.molecule) < 3:
+            raise ValueError(
+                "ORCA SurfCrossNumFreq requires at least 3 atoms; "
+                f"the supplied structure contains {len(self.molecule)}."
+            )
 
     @property
     def results(self):
