@@ -31,7 +31,6 @@ logger = logging.getLogger(__name__)
 @click_orca_solvent_options
 @click.option(
     "--m1",
-    "multiplicity_a",
     type=int,
     default=None,
     required=True,
@@ -39,7 +38,6 @@ logger = logging.getLogger(__name__)
 )
 @click.option(
     "--m2",
-    "multiplicity_b",
     type=int,
     default=None,
     required=True,
@@ -87,8 +85,8 @@ def mecp(
     solvent_id,
     solvent_options,
     solventfilename,
-    multiplicity_a,
-    multiplicity_b,
+    m1,
+    m2,
     mode,
     maxiter,
     broken_sym,
@@ -149,9 +147,9 @@ def mecp(
     mecp_settings = ORCAMECPJobSettings.from_settings(mecp_project_settings)
 
     # required: two state multiplicities
-    mecp_settings.multiplicity_a = multiplicity_a
-    mecp_settings.multiplicity_b = multiplicity_b
-    mecp_settings.multiplicity = multiplicity_a
+    mecp_settings.multiplicity_a = m1
+    mecp_settings.multiplicity_b = m2
+    mecp_settings.multiplicity = m1
 
     # SurfCrossOpt optimisation mode (opt or numfreq)
     mecp_settings.mode = mode.lower()
