@@ -2,6 +2,7 @@ import logging
 import math
 import os
 import re
+from dataclasses import dataclass
 from functools import cached_property
 
 import numpy as np
@@ -32,6 +33,20 @@ from chemsmart.utils.utils import (
 p = PeriodicTable()
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class ORCAMECPResult:
+    """Summary of a native ORCA SurfCrossOpt calculation."""
+
+    converged: bool
+    normal_termination: bool
+    state_1_energy: float | None
+    state_2_energy: float | None
+    energy_gap: float | None
+    final_structure: Molecule | None
+    numfreq_requested: bool
+    energy_gap_history: tuple[float, ...]
 
 
 class ORCAOutput(ORCAFileMixin):
@@ -149,6 +164,90 @@ class ORCAOutput(ORCAFileMixin):
                 energy = float(line.split()[-1])
                 energies.append(energy)
         return energies
+
+    @cached_property
+    def is_mecp(self):
+        """Whether this output contains a native ORCA MECP calculation."""
+        return any(
+            "SURFCROSSOPT" in line.upper() or "%MECP" in line.upper()
+            for line in self.contents
+        )
+
+    @cached_property
+    def mecp_energy_gap_history(self):
+        """Energy differences between the two surfaces, in Hartree."""
+        pattern = re.compile(
+            r"Energy difference between (?:both|the two) states\s*"
+            r"(?::|=)?\s*([-+]?\d*\.?\d+(?:[EeDd][-+]?\d+)?)",
+            re.IGNORECASE,
+        )
+        gaps = []
+        for line in self.contents:
+            match = pattern.search(line)
+            if match:
+                gaps.append(float(match.group(1).replace("D", "E")))
+        return gaps
+
+    @cached_property
+    def mecp_state_energies(self):
+        """Final PES1/PES2 energies adjacent to the last reported MECP gap."""
+        explicit = re.compile(
+            r"(?:PES|STATE)\s*([12])\s*(?:ENERGY)?\s*[:=]\s*"
+            r"([-+]?\d*\.?\d+(?:[EeDd][-+]?\d+)?)",
+            re.IGNORECASE,
+        )
+        found = {}
+        for line in self.contents:
+            match = explicit.search(line)
+            if match:
+                found[int(match.group(1))] = float(
+                    match.group(2).replace("D", "E")
+                )
+        if 1 in found and 2 in found:
+            return found[1], found[2]
+
+        # ORCA versions that do not label PES energies print the two SCF
+        # results immediately before the corresponding energy-difference line.
+        gap_index = None
+        for index, line in enumerate(self.contents):
+            if "ENERGY DIFFERENCE BETWEEN" in line.upper():
+                gap_index = index
+        if gap_index is None:
+            return None, None
+        energies = []
+        for line in self.contents[:gap_index]:
+            if "FINAL SINGLE POINT ENERGY" in line:
+                energies.append(float(line.split()[-1].replace("D", "E")))
+        if len(energies) >= 2:
+            return energies[-2], energies[-1]
+        return None, None
+
+    @cached_property
+    def mecp_result(self):
+        """Return a structured summary for a native SurfCrossOpt output."""
+        if not self.is_mecp:
+            return None
+        state_1, state_2 = self.mecp_state_energies
+        gaps = tuple(self.mecp_energy_gap_history)
+        gap = gaps[-1] if gaps else None
+        if gap is None and state_1 is not None and state_2 is not None:
+            gap = state_1 - state_2
+        try:
+            structure = self.final_structure
+        except (IndexError, ValueError):
+            structure = None
+        return ORCAMECPResult(
+            converged=bool(self.converged),
+            normal_termination=self.normal_termination,
+            state_1_energy=state_1,
+            state_2_energy=state_2,
+            energy_gap=gap,
+            final_structure=structure,
+            numfreq_requested=any(
+                "SURFCROSSNUMFREQ" in line.upper() for line in self.contents
+            ),
+            energy_gap_history=gaps,
+        )
 
     @cached_property
     def input_coordinates_block(self):

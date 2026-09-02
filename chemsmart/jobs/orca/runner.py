@@ -67,6 +67,7 @@ class ORCAJobRunner(JobRunner):
         "orcairc",
         "orcaqmmm",
         "orcaneb",
+        "orcamecp",
     ]
 
     PROGRAM = "orca"
@@ -342,6 +343,25 @@ class ORCAJobRunner(JobRunner):
                     )
                     copy(cosmorsxyz_path, dest)
                     logger.info(f"Copied {cosmorsxyz_path} to {dest}.")
+                    continue
+
+                moinp_match = re.search(
+                    r'^\s*moinp\s+["\']([^"\']+)["\']', line, re.IGNORECASE
+                )
+                if moinp_match:
+                    source = getattr(job.settings, "moinp", None)
+                    if source is None:
+                        source = moinp_match.group(1)
+                    if not os.path.isabs(source):
+                        source = os.path.join(job.folder, source)
+                    if not os.path.isfile(source):
+                        raise FileNotFoundError(
+                            f"MECP PES2 orbital file does not exist: {source}"
+                        )
+                    destination = os.path.join(
+                        self.running_directory, os.path.basename(source)
+                    )
+                    copy(source, destination)
 
     def _write_input(self, job):
         """

@@ -2132,3 +2132,143 @@ class ORCANEBJobSettings(ORCAJobSettings):
             )
 
         return route_string
+
+
+class ORCAMECPJobSettings(ORCAJobSettings):
+    """
+    Settings for ORCA Minimum Energy Cross Point (MECP) calculations
+    using the native ``SurfCrossOpt`` optimization in ORCA.
+
+    ORCA performs a single self-contained geometry optimization on the
+    crossing seam between two spin states — all iterations are internal to
+    ORCA (unlike the Gaussian MECP driver in this package which runs two
+    Gaussian SP+forces sub-jobs per Python-driven step).
+
+    Attributes:
+        multiplicity_a (int | None): Spin multiplicity of state A.
+        multiplicity_b (int | None): Spin multiplicity of state B.
+        mode (str): ``"opt"`` (default) uses ``SurfCrossOpt``,
+            ``"numfreq"`` uses ``SurfCrossOpt SurfCrossNumFreq`` for numerical
+            frequency verification on the converged geometry.
+        maxiter (int | None): Maximum number of SurfCrossOpt iterations
+            (written as ``MaxIter`` in ``%geom``; the ORCA ``%mecp`` block
+            has no ``MaxIter`` keyword).
+    """
+
+    MODES = frozenset({"opt", "numfreq"})
+
+    def __init__(
+        self,
+        multiplicity_a=None,
+        multiplicity_b=None,
+        mode="opt",
+        maxiter=None,
+        broken_sym=None,
+        moinp=None,
+        casscf_nel=None,
+        casscf_norb=None,
+        casscf_mult=None,
+        casscf_nroots=None,
+        casscf_bweight=None,
+        **kwargs,
+    ):
+        super().__init__(**kwargs)
+        mode = mode.lower()
+        if mode not in self.MODES:
+            raise ValueError(
+                f"ORCAMECPJobSettings.mode must be one of {sorted(self.MODES)}, "
+                f"got {mode!r}."
+            )
+        self.multiplicity_a = multiplicity_a
+        self.multiplicity_b = multiplicity_b
+        self.mode = mode
+        self.maxiter = maxiter
+        self.broken_sym = broken_sym
+        self.moinp = moinp
+        self.casscf_nel = casscf_nel
+        self.casscf_norb = casscf_norb
+        self.casscf_mult = casscf_mult
+        self.casscf_nroots = casscf_nroots
+        self.casscf_bweight = casscf_bweight
+
+    def validate(self):
+        """Validate the two surfaces required by native ORCA MECP."""
+        if self.charge is None:
+            raise ValueError("ORCA MECP requires a charge.")
+        if self.multiplicity_a is None or self.multiplicity_b is None:
+            raise ValueError("ORCA MECP requires two multiplicities.")
+        if self.multiplicity_a <= 0 or self.multiplicity_b <= 0:
+            raise ValueError("ORCA MECP multiplicities must be positive.")
+        if self.multiplicity_a == self.multiplicity_b:
+            raise ValueError(
+                "ORCA MECP requires two different multiplicities."
+            )
+        if self.maxiter is not None and self.maxiter <= 0:
+            raise ValueError("ORCA MECP maxiter must be positive.")
+        if self.broken_sym is not None and len(self.broken_sym) != 2:
+            raise ValueError("ORCA MECP broken_sym requires two integers.")
+        if (self.casscf_nel is None) != (self.casscf_norb is None):
+            raise ValueError(
+                "CASSCF MECP requires both casscf_nel and casscf_norb."
+            )
+        # PES1 is the state on the coordinate line; keep one source of truth.
+        self.multiplicity = self.multiplicity_a
+        return self
+
+    @classmethod
+    def from_settings(cls, settings):
+        """Build MECP settings from an ORCAJobSettings-like object."""
+        if isinstance(settings, cls):
+            return settings.copy()
+        return cls(**settings.__dict__)
+
+    @property
+    def route_string(self):
+        """
+        Return the ORCA route string for a SurfCrossOpt MECP job.
+
+        ``SurfCrossOpt`` is an **additional** keyword that modifies the
+        regular geometry-optimization RunTyp — the route therefore keeps
+        ``Opt`` and inserts ``SurfCrossOpt`` after it.  In
+        ``mode="numfreq"`` the keyword ``SurfCrossNumFreq`` is appended
+        for a numerical effective-Hessian verification of the converged
+        crossing seam (see ORCA §4.9.1).
+
+        Example output::
+
+            ! Opt SurfCrossOpt B3LYP def2-SVP
+            ! Opt SurfCrossOpt SurfCrossNumFreq PBE0 def2-TZVP
+        """
+        if self.route_to_be_written is not None:
+            base = self._get_route_string_from_user_input()
+        else:
+            orig_jobtype = self.jobtype
+            self.jobtype = "opt"
+            try:
+                base = self._get_route_string_from_jobtype()
+            finally:
+                self.jobtype = orig_jobtype
+        if not re.search(r"\bOpt\b", base, re.IGNORECASE):
+            base = re.sub(r"^!\s*", "! Opt ", base, count=1)
+        if not re.search(r"\bSurfCrossOpt\b", base, re.IGNORECASE):
+            base = re.sub(
+                r"\bOpt\b", "Opt SurfCrossOpt", base, count=1,
+                flags=re.IGNORECASE,
+            )
+        # Strip any Freq/NumFreq inherited from project settings —
+        # SurfCrossOpt + separate Freq/NumFreq is not meaningful.
+        base = re.sub(
+            r"\bSurfCrossNumFreq\b", "", base, flags=re.IGNORECASE
+        )
+        base = re.sub(r"\bFreq\b", "", base, flags=re.IGNORECASE)
+        base = re.sub(r"\bNumFreq\b", "", base, flags=re.IGNORECASE)
+        if self.mode == "numfreq":
+            base = re.sub(
+                r"\bSurfCrossOpt\b",
+                "SurfCrossOpt SurfCrossNumFreq",
+                base,
+                count=1,
+            )
+        # Normalise whitespace
+        route_string = re.sub(r"\s+", " ", base).strip()
+        return route_string

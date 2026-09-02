@@ -12,6 +12,7 @@ import os
 from chemsmart.io.molecules.structure import Molecule
 from chemsmart.jobs.orca.settings import (
     ORCAIRCJobSettings,
+    ORCAMECPJobSettings,
     ORCANEBJobSettings,
     ORCAQMMMJobSettings,
     ORCATSJobSettings,
@@ -119,6 +120,7 @@ class ORCAInputWriter(InputWriter):
         self._write_hessian_block(f)
         self._write_irc_block(f)
         self._write_neb_block(f)
+        self._write_mecp_block(f)
         self._write_constrained_atoms(f)
         self._write_charge_and_multiplicity(f)
         self._write_cartesian_coordinates(f)
@@ -971,6 +973,67 @@ class ORCAInputWriter(InputWriter):
             f.write(f"PREOPT_ENDS {bool_str}\n")
 
         f.write("end\n")
+
+    def _write_mecp_block(self, f):
+        """
+        Write the ORCA ``%mecp`` block for SurfCrossOpt MECP jobs.
+
+        Per ORCA 6.1 §4.9.1, ``%mecp`` only takes a single ``Mult`` keyword
+        that specifies the **PES2** multiplicity.  The **PES1** multiplicity
+        is taken from the ``* xyz`` charge/multiplicity line written by
+        :meth:`_write_charge_and_multiplicity`.  Both states must share
+        the same charge and level of theory.
+
+        ``MaxIter`` does **not** belong in ``%mecp`` — it is a ``%geom``
+        keyword and is handled by the existing geometry-optimization
+        infrastructure in :class:`ORCAJobSettings`.
+
+        Example output::
+
+            %mecp
+              Mult 4
+            end
+
+        Args:
+            f: File object to write to.
+        """
+        if not isinstance(self.settings, ORCAMECPJobSettings):
+            return
+
+        s = self.settings
+        # Need at least one of (multiplicity_a, multiplicity_b) — the
+        # * xyz multiplicity (PES1) is inherited from project settings.
+        # PES2 multiplicity is the one that goes into %mecp Mult.
+        s.validate()
+
+        f.write("%mecp\n")
+        f.write(f"  Mult {s.multiplicity_b}\n")
+        if s.moinp is not None:
+            f.write(f'  moinp "{os.path.basename(s.moinp)}"\n')
+        if s.broken_sym is not None:
+            values = self._format_mecp_values(s.broken_sym)
+            f.write(f"  brokenSym {values}\n")
+        for attr, keyword in (
+            ("casscf_nel", "casscf_nel"),
+            ("casscf_norb", "casscf_norb"),
+            ("casscf_mult", "casscf_mult"),
+            ("casscf_nroots", "casscf_nroots"),
+            ("casscf_bweight", "casscf_bweight"),
+        ):
+            value = getattr(s, attr)
+            if value is not None:
+                f.write(f"  {keyword} {self._format_mecp_values(value)}\n")
+        f.write("end\n")
+        if s.maxiter is not None:
+            f.write("%geom\n")
+            f.write(f"  MaxIter {s.maxiter}\n")
+            f.write("end\n")
+
+    @staticmethod
+    def _format_mecp_values(value):
+        if isinstance(value, (list, tuple)):
+            return ",".join(str(item) for item in value)
+        return str(value)
 
     def _write_constrained_atoms(self, f):
         """
