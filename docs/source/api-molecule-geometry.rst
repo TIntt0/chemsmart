@@ -55,7 +55,9 @@ Distances, Angles, and Dihedrals
    dist_matrix = mol.distance_matrix
    print(f"Distance matrix shape: {dist_matrix.shape}")
 
-The example prints::
+The example prints:
+
+.. code::
 
    Distance 1-2: 0.966 Å
    Angle 2-1-3: 103.8°
