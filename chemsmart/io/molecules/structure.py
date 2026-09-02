@@ -2138,9 +2138,9 @@ class Molecule:
         Write coordinates in Gaussian format.
         """
         assert self.symbols is not None, "Symbols to write should not be None!"
-        assert self.positions is not None, (
-            "Positions to write should not be None!"
-        )
+        assert (
+            self.positions is not None
+        ), "Positions to write should not be None!"
         if self.frozen_atoms is None or len(self.frozen_atoms) == 0:
             for i, (s, (x, y, z)) in enumerate(
                 zip(self.chemical_symbols, self.positions)
@@ -2165,9 +2165,9 @@ class Molecule:
             return
         else:
             logger.debug(f"Writing PBC conditions: {self.pbc_conditions}")
-            assert self.translation_vectors is not None, (
-                "Translation vectors should not be None when PBC conditions are given!"
-            )
+            assert (
+                self.translation_vectors is not None
+            ), "Translation vectors should not be None when PBC conditions are given!"
             for i in range(len(self.translation_vectors)):
                 f.write(
                     f"TV    {self.translation_vectors[i][0]:15.10f} "
@@ -2180,9 +2180,9 @@ class Molecule:
         Write coordinates in ORCA format.
         """
         assert self.symbols is not None, "Symbols to write should not be None!"
-        assert self.positions is not None, (
-            "Positions to write should not be None!"
-        )
+        assert (
+            self.positions is not None
+        ), "Positions to write should not be None!"
 
         # if self.frozen_atoms is None:
         # commented above out since with frozen atom
@@ -3802,9 +3802,9 @@ class QMMMMolecule(Molecule):
     def _write_gaussian_coordinates(self, f):
 
         assert self.symbols is not None, "Symbols to write should not be None!"
-        assert self.positions is not None, (
-            "Positions to write should not be None!"
-        )
+        assert (
+            self.positions is not None
+        ), "Positions to write should not be None!"
         from chemsmart.jobs.gaussian.settings import GaussianQMMMJobSettings
 
         if self.bonded_atoms is None:

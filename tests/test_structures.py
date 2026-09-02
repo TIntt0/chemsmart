@@ -2169,9 +2169,7 @@ class TestQMMMinMolecule:
 
             assert [" ".join(line.split()) for line in lines] == [
                 " ".join(line.split()) for line in expected_lines
-            ], (
-                f"Mismatch in written Gaussian coordinates:\nExpected: {expected_lines}\nGot: {lines}"
-            )
+            ], f"Mismatch in written Gaussian coordinates:\nExpected: {expected_lines}\nGot: {lines}"
         if os.path.exists("tmp.xyz"):
             os.remove("tmp.xyz")
 
