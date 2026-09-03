@@ -2,9 +2,9 @@
  Geometry Analysis
 ###################
 
-*********************
+**********************
  Geometric Parameters
-*********************
+**********************
 
 All geometry methods use **1-based** atom indices, matching Gaussian / ORCA conventions.
 
