@@ -1,15 +1,18 @@
-# Detect the operating system
-RAW_OS := $(shell uname -s 2>/dev/null || echo $(OS))
-
-ifneq ($(filter Windows Windows_NT MINGW% MSYS% CYGWIN%,$(RAW_OS)),)
+# Detect Windows before invoking uname: cmd.exe cannot redirect to /dev/null.
+ifeq ($(OS),Windows_NT)
     OS_FAMILY := Windows
 else
-    OS_FAMILY := Unix
+    RAW_OS := $(shell uname -s 2>/dev/null)
+    ifneq ($(filter MINGW% MSYS% CYGWIN%,$(RAW_OS)),)
+        OS_FAMILY := Windows
+    else
+        OS_FAMILY := Unix
+    endif
 endif
 
 ifeq ($(OS_FAMILY),Windows)
     SHELL := cmd
-    ENV_PREFIX := $(if $(shell where conda >nul 2>&1 && conda env list | findstr chemsmart >nul 2>&1),conda run -n chemsmart --no-capture-output ,)
+    ENV_PREFIX := $(if $(filter chemsmart,$(CONDA_DEFAULT_ENV)),,$(if $(shell where conda >nul 2>&1),conda run -n chemsmart --no-capture-output ,))
     SEP := \\
     RM := del /Q
     RMDIR := rmdir /S /Q
@@ -139,6 +142,10 @@ ifeq ($(OS_FAMILY),Windows)
 	$(ENV_PREFIX)python $(CHEMSMART_PATH) config
 	@echo Running chemsmart server configuration...
 	$(ENV_PREFIX)python $(CHEMSMART_PATH) config server || ( $(ECHO) "Error: chemsmart server configuration failed." && exit 1 )
+	@echo Updating chemsmart project templates...
+	$(ENV_PREFIX)python $(CHEMSMART_PATH) update projects || ( $(ECHO) "Error: chemsmart project template update failed." && exit 1 )
+	@echo Updating existing chemsmart server configurations...
+	$(ENV_PREFIX)python $(CHEMSMART_PATH) update configs || ( $(ECHO) "Error: chemsmart server configuration update failed." && exit 1 )
 	@echo.
 	@echo ===========================================================
 	@echo  Configuration complete!
@@ -153,6 +160,10 @@ else
 	$(ENV_PREFIX)python $(CHEMSMART_PATH) config
 	@echo Running chemsmart server configuration...
 	$(ENV_PREFIX)python $(CHEMSMART_PATH) config server || ( $(ECHO) "Error: chemsmart server configuration failed." && exit 1 )
+	@echo Updating chemsmart project templates...
+	$(ENV_PREFIX)python $(CHEMSMART_PATH) update projects || ( $(ECHO) "Error: chemsmart project template update failed." && exit 1 )
+	@echo Updating existing chemsmart server configurations...
+	$(ENV_PREFIX)python $(CHEMSMART_PATH) update configs || ( $(ECHO) "Error: chemsmart server configuration update failed." && exit 1 )
 	@echo ""
 	@echo "==========================================================="
 	@echo " Configuration complete!"
@@ -225,6 +236,16 @@ test: lint coverage-clean ## Run tests and generate terminal, XML, and HTML cove
 		--tb=short \
 		tests/
 
+.PHONY: test-cov-io
+test-cov-io: coverage-clean ## Branch coverage for converter.py + structure.py (target ≥90% each).
+	$(ENV_PREFIX)pytest tests/ \
+		--cov=chemsmart.io.converter \
+		--cov=chemsmart.io.molecules.structure \
+		--cov-branch \
+		--cov-report=term-missing \
+		--cov-report=xml:coverage-io-target.xml \
+		-q
+
 # === Docs ===
 .PHONY: docs-lint docs-fmt docs docs-clean
 
@@ -238,11 +259,15 @@ else
 	$(ENV_PREFIX)rstcheck -r docs/source
 endif
 
-# Format all .rst files in docs/source using rstfmt
+# Format all .rst files in docs/source recursively; rstfmt edits them in place.
 docs-fmt: ## Auto-format reStructuredText with rstfmt.
 	@echo "==> Running rstfmt..."
-	# Format recursively; --in-place edits files
-	$(ENV_PREFIX)rstfmt -w 120 docs/source
+ifeq ($(OS_FAMILY),Windows)
+	@set PYTHONUTF8=1&& $(ENV_PREFIX)rstfmt -w 120 docs/source
+	@$(ENV_PREFIX)python -c "from pathlib import Path; [p.write_bytes(p.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')) for p in Path('docs/source').rglob('*.rst')]"
+else
+	@$(ENV_PREFIX)rstfmt -w 120 docs/source
+endif
 
 docs: ## Build documentation (HTML).
 	+$(ENV_PREFIX)$(MAKE) -C docs html  # leading + tells GNU Make this is a recursive make; it preserves jobserver flags, etc.
@@ -260,7 +285,9 @@ ifeq ($(OS_FAMILY),Windows)
 	@for /D /R . %%d in (__pycache__) do @if exist "%%d" $(RMDIR) "%%d" 2>$(NULL)
 	@for /R . %%f in (Thumbs.db) do @$(RM) "%%f" 2>$(NULL)
 	@for /R . %%f in (*~) do @$(RM) "%%f" 2>$(NULL)
-	@$(RMDIR) .cache .pytest_cache build dist *.egg-info htmlcov .tox .coverage.* docs\_build 2>$(NULL)
+	@for %%d in (.cache .pytest_cache build dist htmlcov .tox docs\_build) do @if exist "%%d" $(RMDIR) "%%d" 2>$(NULL)
+	@for /D %%d in (*.egg-info) do @if exist "%%d" $(RMDIR) "%%d" 2>$(NULL)
+	@for %%f in (.coverage.*) do @if exist "%%f" $(RM) "%%f" 2>$(NULL)
 else
 	@find ./ -name '*.pyc' -exec rm -f {} + 2>/dev/null
 	@find ./ -name '__pycache__' -exec rm -rf {} + 2>/dev/null
