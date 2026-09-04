@@ -1015,22 +1015,41 @@ class Molecule:
         """
         Calculate the dihedral angle between four points.
         """
-        v1 = position1 - position2
-        v2 = position3 - position2
-        v3 = position4 - position3
-        n1 = np.cross(v1, v2)
-        n2 = np.cross(v2, v3)
+        position1, position2, position3, position4 = map(
+            lambda position: np.asarray(position, dtype=float),
+            (position1, position2, position3, position4),
+        )
+        bond1 = position1 - position2
+        central_bond = position3 - position2
+        bond3 = position4 - position3
+
+        central_bond_norm = np.linalg.norm(central_bond)
+        if central_bond_norm < 1e-12:
+            raise ValueError("Points 2 and 3 must be distinct.")
+        central_bond_unit = central_bond / central_bond_norm
+
+        # Project both outer bonds onto the plane perpendicular to the
+        # central bond.  Their signed angle is the molecular dihedral.
+        projected1 = (
+            bond1
+            - np.dot(bond1, central_bond_unit) * central_bond_unit
+        )
+        projected3 = (
+            bond3
+            - np.dot(bond3, central_bond_unit) * central_bond_unit
+        )
         if (
-            np.isclose(np.linalg.norm(v2), 0.0)
-            or np.isclose(np.linalg.norm(n1), 0.0)
-            or np.isclose(np.linalg.norm(n2), 0.0)
+            np.linalg.norm(projected1) < 1e-12
+            or np.linalg.norm(projected3) < 1e-12
         ):
             raise ValueError(
-                "Dihedral is undefined for zero-length or collinear vectors."
+                "Dihedral is undefined for collinear points."
             )
-        x = np.dot(n1, n2)
-        v2_unit = v2 / np.linalg.norm(v2)
-        y = np.dot(np.cross(n1, v2_unit), n2)
+
+        x = np.dot(projected1, projected3)
+        y = np.dot(
+            np.cross(central_bond_unit, projected1), projected3
+        )
         return np.degrees(np.arctan2(y, x))
 
     def copy(self):

@@ -10,6 +10,7 @@ import pytest
 from ase import Atoms
 from pymatgen.core.structure import Molecule as PMGMolecule
 from rdkit import Chem
+from rdkit.Chem import rdMolTransforms
 from rdkit.Chem.rdchem import Mol as RDKitMolecule
 
 from chemsmart.io.file import CDXFile, PKaCDXFile
@@ -573,9 +574,9 @@ class TestStructures:
     @pytest.mark.parametrize(
         ("position4", "expected_dihedral"),
         [
-            ([1.0, 1.0, 0.0], 180.0),
+            ([1.0, 1.0, 0.0], 0.0),
             ([0.0, 1.0, 1.0], -90.0),
-            ([-1.0, 1.0, 0.0], 0.0),
+            ([-1.0, 1.0, 0.0], 180.0),
         ],
     )
     def test_get_dihedral_known_values(self, position4, expected_dihedral):
@@ -612,6 +613,40 @@ class TestStructures:
         assert np.isclose(
             mol.get_dihedral(1, 2, 3, 4),
             mol.get_dihedral_from_positions(*mol.positions),
+        )
+
+    @pytest.mark.parametrize(
+        ("atom_indices", "expected_dihedral"),
+        [
+            ((3, 1, 2, 4), -8.521144207014),
+            ((3, 1, 2, 6), 170.704142219877),
+            ((2, 1, 3, 7), 135.002352852818),
+            ((2, 1, 3, 8), -47.404418381592),
+        ],
+    )
+    def test_dihedral_for_file_backed_molecule_matches_rdkit(
+        self,
+        single_molecule_xyz_file,
+        atom_indices,
+        expected_dihedral,
+    ):
+        """Real-molecule torsions should match fixed and RDKit values."""
+        mol = Molecule.from_filepath(
+            single_molecule_xyz_file, return_list=False
+        )
+        conformer = mol.to_rdkit().GetConformer()
+        zero_based_indices = tuple(index - 1 for index in atom_indices)
+
+        rdkit_dihedral = rdMolTransforms.GetDihedralDeg(
+            conformer, *zero_based_indices
+        )
+        actual_dihedral = mol.get_dihedral(*atom_indices)
+
+        assert np.isclose(
+            actual_dihedral, expected_dihedral, atol=1e-8
+        )
+        assert np.isclose(
+            actual_dihedral, rdkit_dihedral, atol=1e-8
         )
 
     def test_dihedral_is_independent_of_central_bond_length(self):
@@ -721,7 +756,9 @@ class TestStructures:
         assert np.isclose(water.get_distance(1, 2), 0.965824, atol=1e-6)
         assert np.isclose(water.get_distance(2, 3), 1.52)
         assert np.isclose(water.get_angle(2, 1, 3), 103.792168, atol=1e-6)
-        assert np.isclose(documented_butane.get_dihedral(1, 2, 3, 4), 0.0)
+        assert np.isclose(
+            abs(documented_butane.get_dihedral(1, 2, 3, 4)), 180.0
+        )
         assert len(water.get_all_distances()) == 3
         assert water.distance_matrix.shape == (3, 3)
 
