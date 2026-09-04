@@ -1031,25 +1031,19 @@ class Molecule:
         # Project both outer bonds onto the plane perpendicular to the
         # central bond.  Their signed angle is the molecular dihedral.
         projected1 = (
-            bond1
-            - np.dot(bond1, central_bond_unit) * central_bond_unit
+            bond1 - np.dot(bond1, central_bond_unit) * central_bond_unit
         )
         projected3 = (
-            bond3
-            - np.dot(bond3, central_bond_unit) * central_bond_unit
+            bond3 - np.dot(bond3, central_bond_unit) * central_bond_unit
         )
         if (
             np.linalg.norm(projected1) < 1e-12
             or np.linalg.norm(projected3) < 1e-12
         ):
-            raise ValueError(
-                "Dihedral is undefined for collinear points."
-            )
+            raise ValueError("Dihedral is undefined for collinear points.")
 
         x = np.dot(projected1, projected3)
-        y = np.dot(
-            np.cross(central_bond_unit, projected1), projected3
-        )
+        y = np.dot(np.cross(central_bond_unit, projected1), projected3)
         return np.degrees(np.arctan2(y, x))
 
     def copy(self):

@@ -642,12 +642,8 @@ class TestStructures:
         )
         actual_dihedral = mol.get_dihedral(*atom_indices)
 
-        assert np.isclose(
-            actual_dihedral, expected_dihedral, atol=1e-8
-        )
-        assert np.isclose(
-            actual_dihedral, rdkit_dihedral, atol=1e-8
-        )
+        assert np.isclose(actual_dihedral, expected_dihedral, atol=1e-8)
+        assert np.isclose(actual_dihedral, rdkit_dihedral, atol=1e-8)
 
     def test_dihedral_is_independent_of_central_bond_length(self):
         """Changing only the central bond length must not change torsion."""
