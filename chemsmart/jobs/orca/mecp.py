@@ -6,6 +6,7 @@ crossing-point optimizations using ORCA's native SurfCrossOpt feature.
 """
 
 import logging
+import os
 from typing import Type
 
 from chemsmart.jobs.orca.job import ORCAJob
@@ -35,6 +36,7 @@ class ORCAMECPJob(ORCAJob):
     """
 
     TYPE = "orcamecp"
+    DEFAULT_ENERGY_GAP_TOLERANCE = 1.0e-4
 
     @classmethod
     def settings_class(cls) -> Type[ORCAMECPJobSettings]:
@@ -103,6 +105,112 @@ class ORCAMECPJob(ORCAJob):
                 f"{broken_sym_multiplicity}, which is incompatible with "
                 f"the molecule's {electron_count} electrons."
             )
+
+    @property
+    def report_file(self):
+        """Path to the concise, user-facing MECP quality report."""
+        return os.path.join(self.folder, f"{self.label}_report.log")
+
+    def write_report(self, energy_gap_tolerance=None):
+        """Write a concise quality report for a completed ORCA MECP job.
+
+        ORCA remains responsible for the optimization and frequency
+        calculation.  This report collects the most important acceptance
+        checks in one place so users do not need to inspect the large ORCA
+        output and its auxiliary files manually.
+
+        Returns:
+            str | None: Report path, or ``None`` if no ORCA output exists.
+        """
+        output = self._output()
+        if output is None:
+            return None
+
+        tolerance = (
+            self.DEFAULT_ENERGY_GAP_TOLERANCE
+            if energy_gap_tolerance is None
+            else float(energy_gap_tolerance)
+        )
+        if tolerance <= 0:
+            raise ValueError("MECP energy-gap tolerance must be positive.")
+
+        result = output.mecp_result
+        if result is None:
+            return None
+
+        issues = []
+        if not result.normal_termination:
+            issues.append("ORCA did not terminate normally")
+        if not result.converged:
+            issues.append("MECP geometry optimization did not converge")
+        if result.energy_gap is None:
+            issues.append("final two-state energy gap was not found")
+        elif abs(result.energy_gap) > tolerance:
+            issues.append(
+                "final two-state energy gap exceeds the acceptance tolerance"
+            )
+        if result.numfreq_requested and not result.numfreq_completed:
+            issues.append("requested SurfCrossNumFreq calculation is incomplete")
+        elif result.numfreq_completed and result.is_minimum is False:
+            issues.append("imaginary mode detected on the crossing hyperline")
+
+        if not result.normal_termination or not result.converged:
+            status = "FAILED"
+        elif issues:
+            status = "WARNING"
+        else:
+            status = "PASSED"
+
+        def value_or_na(value, precision=12):
+            return "N/A" if value is None else f"{value:.{precision}f}"
+
+        gap_kcal = (
+            None
+            if result.energy_gap is None
+            else abs(result.energy_gap) * 627.509474
+        )
+        lines = [
+            "CHEMSMART ORCA MECP quality report",
+            f"job={self.label}",
+            f"status={status}",
+            "",
+            "Completion checks",
+            f"normal_termination={result.normal_termination}",
+            f"optimization_converged={result.converged}",
+            "",
+            "Final crossing-point energies (Hartree)",
+            f"state_1_energy={value_or_na(result.state_1_energy)}",
+            f"state_2_energy={value_or_na(result.state_2_energy)}",
+            f"energy_gap={value_or_na(result.energy_gap)}",
+            f"absolute_energy_gap={value_or_na(None if result.energy_gap is None else abs(result.energy_gap))}",
+            f"absolute_energy_gap_kcal_mol={value_or_na(gap_kcal, 6)}",
+            f"energy_gap_tolerance={tolerance:.8f}",
+            f"energy_gap_accepted={result.energy_gap is not None and abs(result.energy_gap) <= tolerance}",
+            "",
+            "Crossing-hyperline frequency check",
+            f"numfreq_requested={result.numfreq_requested}",
+            f"numfreq_completed={result.numfreq_completed}",
+            f"state_1_imaginary_frequencies_cm-1={list(result.state_1_imaginary_frequencies)}",
+            f"state_2_imaginary_frequencies_cm-1={list(result.state_2_imaginary_frequencies)}",
+            f"is_minimum={result.is_minimum}",
+            "",
+            "Assessment",
+        ]
+        if issues:
+            lines.extend(f"- {issue}" for issue in issues)
+        else:
+            lines.append("- All requested MECP quality checks passed.")
+        if status == "WARNING":
+            lines.append(
+                "- Review the ORCA output; refinement from the final geometry "
+                "may be appropriate."
+            )
+        lines.append("")
+
+        with open(self.report_file, "w", encoding="utf-8") as report:
+            report.write("\n".join(lines))
+        logger.info(f"Wrote ORCA MECP quality report: {self.report_file}")
+        return self.report_file
 
     @property
     def results(self):

@@ -305,6 +305,89 @@ def test_real_ch3o_ch2oh_numfreq_result():
     assert result.state_2_imaginary_frequencies == ()
 
 
+def test_orca_mecp_quality_report(
+    tmp_path, orca_jobrunner_no_scratch
+):
+    source = Path(
+        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
+    ).resolve()
+    xyz = Path(
+        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
+    ).resolve()
+    job = ORCAMECPJob.from_filename(
+        filename=str(xyz),
+        settings=mecp_settings(
+            charge=1,
+            multiplicity_a=3,
+            multiplicity_b=1,
+            mode="numfreq",
+        ),
+        label="ch3o_ch2oh_mecp",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    job.set_folder(str(tmp_path))
+    shutil.copy(source, job.outputfile)
+
+    report_path = job.write_report(energy_gap_tolerance=2.0e-4)
+    report = Path(report_path).read_text(encoding="utf-8")
+
+    assert Path(report_path).name == "ch3o_ch2oh_mecp_report.log"
+    assert "CHEMSMART ORCA MECP quality report" in report
+    assert "status=PASSED" in report
+    assert "normal_termination=True" in report
+    assert "optimization_converged=True" in report
+    assert "energy_gap_accepted=True" in report
+    assert "numfreq_completed=True" in report
+    assert "is_minimum=True" in report
+
+
+def test_orca_mecp_quality_report_warns_for_large_final_gap(
+    tmp_path, orca_jobrunner_no_scratch
+):
+    xyz = Path(
+        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
+    ).resolve()
+    job = ORCAMECPJob.from_filename(
+        filename=str(xyz),
+        settings=mecp_settings(
+            charge=1,
+            multiplicity_a=3,
+            multiplicity_b=1,
+        ),
+        label="large_gap_mecp",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    job.set_folder(str(tmp_path))
+    Path(job.outputfile).write_text(
+        """|  1> ! B3LYP TZVP Opt SurfCrossOpt
+|  2> %mecp Mult 1
+FINAL SINGLE POINT ENERGY     -114.621194606632
+FINAL SINGLE POINT ENERGY     -114.621307200948
+Energy difference between both states        0.000112594
+THE OPTIMIZATION HAS CONVERGED
+****ORCA TERMINATED NORMALLY****
+""",
+        encoding="utf-8",
+    )
+
+    report = Path(job.write_report()).read_text(encoding="utf-8")
+
+    assert "status=WARNING" in report
+    assert "energy_gap_accepted=False" in report
+    assert "final two-state energy gap exceeds" in report
+
+
+def test_orca_runner_writes_mecp_report_after_run(
+    orca_jobrunner_no_scratch,
+):
+    job = MagicMock()
+    job.TYPE = "orcamecp"
+
+    orca_jobrunner_no_scratch._postrun(job)
+
+    job.write_report.assert_called_once_with()
+
+
 def test_numfreq_imaginary_mode_is_not_minimum(tmp_path):
     source = Path(
         "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"

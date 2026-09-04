@@ -475,6 +475,15 @@ class ORCAJobRunner(JobRunner):
                             f"Failed to copy file {file} to {job.folder}: {e}"
                         )
 
+        # Native ORCA MECP calculations produce many auxiliary files.  Write
+        # one concise report after the output has been copied back from
+        # scratch, matching the report-file convention used by Gaussian MECP.
+        if job.TYPE == "orcamecp":
+            try:
+                job.write_report()
+            except (OSError, ValueError) as e:
+                logger.error(f"Failed to write ORCA MECP quality report: {e}")
+
 
 class FakeORCAJobRunner(ORCAJobRunner):
     """
