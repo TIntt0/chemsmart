@@ -1,10 +1,13 @@
-# Detect the operating system
-RAW_OS := $(shell uname -s 2>/dev/null || echo $(OS))
-
-ifneq ($(filter Windows Windows_NT MINGW% MSYS% CYGWIN%,$(RAW_OS)),)
+# Detect Windows before invoking uname: cmd.exe cannot redirect to /dev/null.
+ifeq ($(OS),Windows_NT)
     OS_FAMILY := Windows
 else
-    OS_FAMILY := Unix
+    RAW_OS := $(shell uname -s 2>/dev/null)
+    ifneq ($(filter MINGW% MSYS% CYGWIN%,$(RAW_OS)),)
+        OS_FAMILY := Windows
+    else
+        OS_FAMILY := Unix
+    endif
 endif
 
 ifeq ($(OS_FAMILY),Windows)
