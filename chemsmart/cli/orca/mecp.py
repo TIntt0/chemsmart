@@ -61,7 +61,13 @@ logger = logging.getLogger(__name__)
     help="Maximum number of SurfCrossOpt iterations.",
 )
 @click.option(
-    "--broken-sym", default=None, help="PES2 brokenSym pair, e.g. 1,1."
+    "--broken-sym",
+    default=None,
+    help=(
+        "PES2 broken-symmetry pair NA,NB: unpaired electrons on two "
+        "antiferromagnetically coupled centres. For example, 1,1 produces "
+        "an open-shell singlet and therefore requires --m2 1."
+    ),
 )
 @click.option(
     "--moinp",

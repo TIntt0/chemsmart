@@ -1,5 +1,8 @@
 """Tests for native ORCA SurfCrossOpt support."""
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -58,7 +61,6 @@ def test_feo_official_example_input(
     settings.multiplicity_a = 6
     settings.multiplicity_b = 4
     settings.maxiter = 200
-    settings.broken_sym = [1, 1]
     settings.validate()
     feo_xyz = Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
     job = ORCAMECPJob.from_filename(
@@ -70,7 +72,7 @@ def test_feo_official_example_input(
     ORCAInputWriter(job=job).write(target_directory=tmpdir)
     content = Path(str(tmpdir), "feo_mecp.inp").read_text()
     assert "Opt SurfCrossOpt" in content
-    assert "%mecp\n  Mult 4\n  brokenSym 1,1\nend" in content
+    assert "%mecp\n  Mult 4\nend" in content
     assert "%geom\n  MaxIter 200\nend" in content
     assert "* xyz 1 6" in content
 
@@ -142,6 +144,124 @@ def test_numfreq_rejects_two_atom_system(orca_jobrunner_no_scratch):
             label="feo_numfreq",
             jobrunner=orca_jobrunner_no_scratch,
         )
+
+
+def test_broken_symmetry_rejects_incompatible_pes2(
+    orca_jobrunner_no_scratch,
+):
+    with pytest.raises(ValueError, match="generates PES2 multiplicity 1"):
+        ORCAMECPJob.from_filename(
+            filename=str(
+                Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
+            ),
+            settings=mecp_settings(broken_sym=[1, 1]),
+            label="invalid_feo_broken_symmetry",
+            jobrunner=orca_jobrunner_no_scratch,
+        )
+
+
+def test_broken_symmetry_rejects_incompatible_electron_parity(
+    orca_jobrunner_no_scratch,
+):
+    with pytest.raises(ValueError, match="incompatible.*33 electrons"):
+        ORCAMECPJob.from_filename(
+            filename=str(
+                Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
+            ),
+            settings=mecp_settings(
+                multiplicity_b=1,
+                broken_sym=[1, 1],
+            ),
+            label="invalid_feo_broken_symmetry_parity",
+            jobrunner=orca_jobrunner_no_scratch,
+        )
+
+
+def test_even_electron_diradical_broken_symmetry_input(
+    tmp_path, orca_jobrunner_no_scratch
+):
+    job = ORCAMECPJob.from_filename(
+        filename=str(
+            Path(
+                "tests/data/ORCATests/inputs/xyz/n2_broken_symmetry.xyz"
+            ).resolve()
+        ),
+        settings=mecp_settings(
+            charge=0,
+            multiplicity_a=7,
+            multiplicity_b=1,
+            functional="HF",
+            basis="def2-SVP",
+            broken_sym=[3, 3],
+            maxiter=3,
+        ),
+        label="n2_broken_symmetry_mecp",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    ORCAInputWriter(job=job).write(target_directory=tmp_path)
+    input_text = (tmp_path / "n2_broken_symmetry_mecp.inp").read_text()
+    assert "%mecp\n  Mult 1\n  brokenSym 3,3\nend" in input_text
+    assert "* xyz 0 7" in input_text
+
+
+@pytest.mark.slow
+@pytest.mark.skipif(
+    os.environ.get("CHEMSMART_RUN_ORCA_INTEGRATION") != "1",
+    reason="set CHEMSMART_RUN_ORCA_INTEGRATION=1 to run ORCA",
+)
+def test_real_orca_broken_symmetry_diradical(
+    tmp_path, orca_jobrunner_no_scratch
+):
+    """Run an opt-in even-electron N2 broken-symmetry MECP smoke test.
+
+    Set ``CHEMSMART_RUN_ORCA_INTEGRATION=1`` and, if needed,
+    ``ORCA_EXE=/absolute/path/to/orca`` before invoking pytest.
+    """
+    executable = os.environ.get("ORCA_EXE") or shutil.which("orca")
+    if executable is None:
+        pytest.skip("ORCA_EXE is not set and orca is not on PATH")
+
+    xyz = Path(
+        "tests/data/ORCATests/inputs/xyz/n2_broken_symmetry.xyz"
+    ).resolve()
+    settings = mecp_settings(
+        charge=0,
+        multiplicity_a=7,
+        multiplicity_b=1,
+        functional="HF",
+        basis="def2-SVP",
+        broken_sym=[3, 3],
+        maxiter=3,
+    )
+    job = ORCAMECPJob.from_filename(
+        filename=str(xyz),
+        settings=settings,
+        label="n2_broken_symmetry_mecp",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    ORCAInputWriter(job=job).write(target_directory=tmp_path)
+    input_path = tmp_path / "n2_broken_symmetry_mecp.inp"
+    output_path = tmp_path / "n2_broken_symmetry_mecp.out"
+    input_text = input_path.read_text()
+    assert "%mecp\n  Mult 1\n  brokenSym 3,3\nend" in input_text
+    assert "* xyz 0 7" in input_text
+
+    with output_path.open("w") as output:
+        completed = subprocess.run(
+            [executable, input_path.name],
+            cwd=tmp_path,
+            stdout=output,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=300,
+        )
+
+    output_text = output_path.read_text(errors="replace")
+    assert completed.returncode == 0, output_text[-4000:]
+    assert "multiplicity" not in output_text.lower() or (
+        "impossible" not in output_text.lower()
+    )
+    assert "ORCA TERMINATED NORMALLY" in output_text
 
 
 def test_orca_official_ch3o_ch2oh_numfreq_input(

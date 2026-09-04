@@ -10,6 +10,7 @@ from typing import Type
 
 from chemsmart.jobs.orca.job import ORCAJob
 from chemsmart.jobs.orca.settings import ORCAMECPJobSettings
+from chemsmart.utils.periodictable import PeriodicTable
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,44 @@ class ORCAMECPJob(ORCAJob):
             raise ValueError(
                 "ORCA SurfCrossNumFreq requires at least 3 atoms; "
                 f"the supplied structure contains {len(self.molecule)}."
+            )
+        self._validate_broken_symmetry()
+
+    def _validate_broken_symmetry(self):
+        """Reject broken-symmetry requests incompatible with PES2.
+
+        ORCA's ``brokenSym NA,NB`` describes two antiferromagnetically
+        coupled centres carrying ``NA`` and ``NB`` unpaired electrons.  The
+        resulting determinant has multiplicity ``abs(NA - NB) + 1``.
+        """
+        broken_sym = self.settings.broken_sym
+        if broken_sym is None:
+            return
+
+        unpaired_a, unpaired_b = broken_sym
+        broken_sym_multiplicity = abs(unpaired_a - unpaired_b) + 1
+        if broken_sym_multiplicity != self.settings.multiplicity_b:
+            raise ValueError(
+                f"brokenSym {unpaired_a},{unpaired_b} generates PES2 "
+                "multiplicity "
+                f"{broken_sym_multiplicity}, but --m2 is "
+                f"{self.settings.multiplicity_b}."
+            )
+
+        periodic_table = PeriodicTable()
+        electron_count = (
+            sum(
+                periodic_table.to_atomic_number(symbol)
+                for symbol in self.molecule.symbols
+            )
+            - self.settings.charge
+        )
+        if (electron_count - (broken_sym_multiplicity - 1)) % 2:
+            raise ValueError(
+                f"brokenSym {unpaired_a},{unpaired_b} generates "
+                "multiplicity "
+                f"{broken_sym_multiplicity}, which is incompatible with "
+                f"the molecule's {electron_count} electrons."
             )
 
     @property

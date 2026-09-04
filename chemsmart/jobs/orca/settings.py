@@ -2205,8 +2205,14 @@ class ORCAMECPJobSettings(ORCAJobSettings):
             )
         if self.maxiter is not None and self.maxiter <= 0:
             raise ValueError("ORCA MECP maxiter must be positive.")
-        if self.broken_sym is not None and len(self.broken_sym) != 2:
-            raise ValueError("ORCA MECP broken_sym requires two integers.")
+        if self.broken_sym is not None:
+            if len(self.broken_sym) != 2 or not all(
+                isinstance(value, int) and value > 0
+                for value in self.broken_sym
+            ):
+                raise ValueError(
+                    "ORCA MECP broken_sym requires two positive integers."
+                )
         if (self.casscf_nel is None) != (self.casscf_norb is None):
             raise ValueError(
                 "CASSCF MECP requires both casscf_nel and casscf_norb."
