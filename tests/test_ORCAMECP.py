@@ -177,31 +177,33 @@ def test_broken_symmetry_rejects_incompatible_electron_parity(
         )
 
 
-def test_even_electron_diradical_broken_symmetry_input(
+def test_twisted_ethylene_broken_symmetry_input(
     tmp_path, orca_jobrunner_no_scratch
 ):
     job = ORCAMECPJob.from_filename(
         filename=str(
             Path(
-                "tests/data/ORCATests/inputs/xyz/n2_broken_symmetry.xyz"
+                "tests/data/ORCATests/inputs/xyz/ethylene_twisted_mecp.xyz"
             ).resolve()
         ),
         settings=mecp_settings(
             charge=0,
-            multiplicity_a=7,
+            multiplicity_a=3,
             multiplicity_b=1,
-            functional="HF",
+            functional="B3LYP",
             basis="def2-SVP",
-            broken_sym=[3, 3],
-            maxiter=3,
+            scf_tol="TightSCF",
+            broken_sym=[1, 1],
+            maxiter=50,
         ),
-        label="n2_broken_symmetry_mecp",
+        label="ethylene_twisted_mecp",
         jobrunner=orca_jobrunner_no_scratch,
     )
     ORCAInputWriter(job=job).write(target_directory=tmp_path)
-    input_text = (tmp_path / "n2_broken_symmetry_mecp.inp").read_text()
-    assert "%mecp\n  Mult 1\n  brokenSym 3,3\nend" in input_text
-    assert "* xyz 0 7" in input_text
+    input_text = (tmp_path / "ethylene_twisted_mecp.inp").read_text()
+    assert "B3LYP def2-SVP TightSCF" in input_text
+    assert "%mecp\n  Mult 1\n  brokenSym 1,1\nend" in input_text
+    assert "* xyz 0 3" in input_text
 
 
 @pytest.mark.slow
@@ -209,10 +211,8 @@ def test_even_electron_diradical_broken_symmetry_input(
     os.environ.get("CHEMSMART_RUN_ORCA_INTEGRATION") != "1",
     reason="set CHEMSMART_RUN_ORCA_INTEGRATION=1 to run ORCA",
 )
-def test_real_orca_broken_symmetry_diradical(
-    tmp_path, orca_jobrunner_no_scratch
-):
-    """Run an opt-in even-electron N2 broken-symmetry MECP smoke test.
+def test_real_orca_twisted_ethylene_mecp(tmp_path, orca_jobrunner_no_scratch):
+    """Run an opt-in twisted-ethylene singlet/triplet MECP calculation.
 
     Set ``CHEMSMART_RUN_ORCA_INTEGRATION=1`` and, if needed,
     ``ORCA_EXE=/absolute/path/to/orca`` before invoking pytest.
@@ -222,29 +222,30 @@ def test_real_orca_broken_symmetry_diradical(
         pytest.skip("ORCA_EXE is not set and orca is not on PATH")
 
     xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/n2_broken_symmetry.xyz"
+        "tests/data/ORCATests/inputs/xyz/ethylene_twisted_mecp.xyz"
     ).resolve()
     settings = mecp_settings(
         charge=0,
-        multiplicity_a=7,
+        multiplicity_a=3,
         multiplicity_b=1,
-        functional="HF",
+        functional="B3LYP",
         basis="def2-SVP",
-        broken_sym=[3, 3],
-        maxiter=3,
+        scf_tol="TightSCF",
+        broken_sym=[1, 1],
+        maxiter=50,
     )
     job = ORCAMECPJob.from_filename(
         filename=str(xyz),
         settings=settings,
-        label="n2_broken_symmetry_mecp",
+        label="ethylene_twisted_mecp",
         jobrunner=orca_jobrunner_no_scratch,
     )
     ORCAInputWriter(job=job).write(target_directory=tmp_path)
-    input_path = tmp_path / "n2_broken_symmetry_mecp.inp"
-    output_path = tmp_path / "n2_broken_symmetry_mecp.out"
+    input_path = tmp_path / "ethylene_twisted_mecp.inp"
+    output_path = tmp_path / "ethylene_twisted_mecp.out"
     input_text = input_path.read_text()
-    assert "%mecp\n  Mult 1\n  brokenSym 3,3\nend" in input_text
-    assert "* xyz 0 7" in input_text
+    assert "%mecp\n  Mult 1\n  brokenSym 1,1\nend" in input_text
+    assert "* xyz 0 3" in input_text
 
     with output_path.open("w") as output:
         completed = subprocess.run(
@@ -253,7 +254,7 @@ def test_real_orca_broken_symmetry_diradical(
             stdout=output,
             stderr=subprocess.STDOUT,
             check=False,
-            timeout=300,
+            timeout=1800,
         )
 
     output_text = output_path.read_text(errors="replace")
@@ -262,6 +263,7 @@ def test_real_orca_broken_symmetry_diradical(
         "impossible" not in output_text.lower()
     )
     assert "ORCA TERMINATED NORMALLY" in output_text
+    assert "THE OPTIMIZATION HAS CONVERGED" in output_text
 
 
 def test_orca_official_ch3o_ch2oh_numfreq_input(
