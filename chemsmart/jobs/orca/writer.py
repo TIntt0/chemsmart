@@ -100,6 +100,20 @@ class ORCAInputWriter(InputWriter):
                         f"Copied solventfilename file {file_to_copy} to {dest}."
                     )
 
+        # PES2 may use a separate orbital guess.  The %mecp block contains
+        # only its basename, so place the referenced GBW beside the input for
+        # both scratch and non-scratch execution.
+        moinp = getattr(self.job.settings, "moinp", None)
+        if moinp is not None:
+            if not os.path.isfile(moinp):
+                raise FileNotFoundError(
+                    f"MECP PES2 orbital file does not exist: {moinp}"
+                )
+            destination = os.path.join(folder, os.path.basename(moinp))
+            if os.path.abspath(moinp) != os.path.abspath(destination):
+                shutil.copy2(moinp, destination)
+                logger.info(f"Copied MECP PES2 orbitals to {destination}.")
+
     def _write_all(self, f):
         """
         Write the complete input file with all sections.
@@ -1024,10 +1038,6 @@ class ORCAInputWriter(InputWriter):
             if value is not None:
                 f.write(f"  {keyword} {self._format_mecp_values(value)}\n")
         f.write("end\n")
-        if s.maxiter is not None:
-            f.write("%geom\n")
-            f.write(f"  MaxIter {s.maxiter}\n")
-            f.write("end\n")
 
     @staticmethod
     def _format_mecp_values(value):
@@ -1043,12 +1053,19 @@ class ORCAInputWriter(InputWriter):
             f: File object to write to
         """
         molecule = self.job.molecule
-        if molecule.frozen_atoms:
+        mecp_maxiter = (
+            self.settings.maxiter
+            if isinstance(self.settings, ORCAMECPJobSettings)
+            else None
+        )
+        if molecule.frozen_atoms or mecp_maxiter is not None:
             f.write("%geom\n")
-            for i, val in enumerate(molecule.frozen_atoms):
+            if mecp_maxiter is not None:
+                f.write(f"  MaxIter {mecp_maxiter}\n")
+            for i, val in enumerate(molecule.frozen_atoms or []):
                 if val == -1:
                     f.write(f"  {{ C {i} C }}\n")  # ORCA is 0-indexed
-            if self.settings.invert_constraints:
+            if molecule.frozen_atoms and self.settings.invert_constraints:
                 f.write("  InvertConstraints True\n")
             f.write("end\n")
 

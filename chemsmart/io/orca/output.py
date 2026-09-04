@@ -46,6 +46,12 @@ class ORCAMECPResult:
     energy_gap: float | None
     final_structure: Molecule | None
     numfreq_requested: bool
+    numfreq_completed: bool
+    state_1_frequencies: tuple[float, ...]
+    state_2_frequencies: tuple[float, ...]
+    state_1_imaginary_frequencies: tuple[float, ...]
+    state_2_imaginary_frequencies: tuple[float, ...]
+    is_minimum: bool | None
     energy_gap_history: tuple[float, ...]
 
 
@@ -236,6 +242,26 @@ class ORCAOutput(ORCAFileMixin):
             structure = self._get_mecp_stationary_point_structure()
         except (IndexError, ValueError):
             structure = None
+        state_1_freqs, state_2_freqs = self.mecp_numfreq_frequencies
+        numfreq_requested = any(
+            "SURFCROSSNUMFREQ" in line.upper() for line in self.contents
+        )
+        numfreq_completed = bool(
+            numfreq_requested
+            and state_1_freqs
+            and state_2_freqs
+            and self.normal_termination
+        )
+        imaginary_cutoff = -1.0
+        state_1_imaginary = tuple(
+            freq for freq in state_1_freqs if freq < imaginary_cutoff
+        )
+        state_2_imaginary = tuple(
+            freq for freq in state_2_freqs if freq < imaginary_cutoff
+        )
+        is_minimum = None
+        if numfreq_completed:
+            is_minimum = not state_1_imaginary and not state_2_imaginary
         return ORCAMECPResult(
             converged=bool(self.converged),
             normal_termination=self.normal_termination,
@@ -243,10 +269,48 @@ class ORCAOutput(ORCAFileMixin):
             state_2_energy=state_2,
             energy_gap=gap,
             final_structure=structure,
-            numfreq_requested=any(
-                "SURFCROSSNUMFREQ" in line.upper() for line in self.contents
-            ),
+            numfreq_requested=numfreq_requested,
+            numfreq_completed=numfreq_completed,
+            state_1_frequencies=state_1_freqs,
+            state_2_frequencies=state_2_freqs,
+            state_1_imaginary_frequencies=state_1_imaginary,
+            state_2_imaginary_frequencies=state_2_imaginary,
+            is_minimum=is_minimum,
             energy_gap_history=gaps,
+        )
+
+    @cached_property
+    def mecp_numfreq_frequencies(self):
+        """Return effective-Hessian frequencies for PES1 and PES2.
+
+        ORCA labels the second surface as ``VIBRATIONAL FREQUENCIES PES2``
+        and prints the first surface under the ordinary
+        ``VIBRATIONAL FREQUENCIES`` heading.  Frequencies include the seven
+        projected zero modes of a non-linear MECP calculation.
+        """
+        frequency_pattern = re.compile(
+            r"^\s*\d+:\s*([-+]?\d+(?:\.\d+)?)\s+cm\*\*-1"
+        )
+
+        def _section(header):
+            values = []
+            for index, line in enumerate(self.contents):
+                if line.strip() != header:
+                    continue
+                current = []
+                for candidate in self.contents[index + 1 :]:
+                    match = frequency_pattern.match(candidate)
+                    if match:
+                        current.append(float(match.group(1)))
+                    elif current:
+                        break
+                if current:
+                    values = current
+            return tuple(values)
+
+        return (
+            _section("VIBRATIONAL FREQUENCIES"),
+            _section("VIBRATIONAL FREQUENCIES PES2"),
         )
 
     def _get_mecp_stationary_point_structure(self):

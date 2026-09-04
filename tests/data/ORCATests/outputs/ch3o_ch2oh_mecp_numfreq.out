@@ -1,0 +1,67 @@
+|  1> ! Opt SurfCrossOpt SurfCrossNumFreq B3LYP TZVP defgrid2
+|  6> %mecp
+|  7>   Mult 1
+|  8> end
+|  9> * xyz 1 3
+
+                    ***        THE OPTIMIZATION HAS CONVERGED     ***
+
+                 *** FINAL ENERGY EVALUATION AT THE STATIONARY POINT ***
+---------------------------------
+CARTESIAN COORDINATES (ANGSTROEM)
+---------------------------------
+  C      0.086457   -0.131383    0.008765
+  H     -0.165724    0.261005    1.099429
+  H      1.126136   -0.015513   -0.325040
+  O     -0.891187    0.034252   -0.743881
+  H     -0.128580   -1.015029    0.770384
+
+FINAL SINGLE POINT ENERGY      -114.621194569527
+FINAL SINGLE POINT ENERGY      -114.621307186894
+Energy difference between both states        0.000112617
+
+----------------------------
+VIBRATIONAL FREQUENCIES PES2
+----------------------------
+
+Scaling factor for frequencies =  1.000000000  (already applied!)
+
+     0:       0.00 cm**-1
+     1:       0.00 cm**-1
+     2:       0.00 cm**-1
+     3:       0.00 cm**-1
+     4:       0.00 cm**-1
+     5:       0.00 cm**-1
+     6:       0.00 cm**-1
+     7:     601.21 cm**-1
+     8:     764.60 cm**-1
+     9:    1068.50 cm**-1
+    10:    1343.94 cm**-1
+    11:    1477.92 cm**-1
+    12:    2299.72 cm**-1
+    13:    2357.27 cm**-1
+    14:    3050.18 cm**-1
+
+-----------------------
+VIBRATIONAL FREQUENCIES
+-----------------------
+
+Scaling factor for frequencies =  1.000000000  (already applied!)
+
+     0:       0.00 cm**-1
+     1:       0.00 cm**-1
+     2:       0.00 cm**-1
+     3:       0.00 cm**-1
+     4:       0.00 cm**-1
+     5:       0.00 cm**-1
+     6:       0.00 cm**-1
+     7:     775.23 cm**-1
+     8:     988.49 cm**-1
+     9:     989.90 cm**-1
+    10:    1218.71 cm**-1
+    11:    1334.59 cm**-1
+    12:    2003.78 cm**-1
+    13:    2355.70 cm**-1
+    14:    3004.94 cm**-1
+
+                             ****ORCA TERMINATED NORMALLY****

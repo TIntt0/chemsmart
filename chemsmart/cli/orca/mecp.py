@@ -64,7 +64,23 @@ logger = logging.getLogger(__name__)
     "--broken-sym", default=None, help="PES2 brokenSym pair, e.g. 1,1."
 )
 @click.option(
-    "--moinp", default=None, type=click.Path(), help="PES2 GBW guess file."
+    "--moinp",
+    default=None,
+    type=click.Path(exists=True, dir_okay=False, resolve_path=True),
+    help="PES2 GBW guess file.",
+)
+@click.option(
+    "-f",
+    "--freeze-atoms",
+    type=str,
+    default=None,
+    help="1-based atom indices to freeze, for example 1,3-5.",
+)
+@click.option(
+    "-i",
+    "--invert-constraints/--no-invert-constraints",
+    default=False,
+    help="Invert the frozen-atom selection.",
 )
 @click.option("--casscf-nel", type=int, default=None)
 @click.option("--casscf-norb", type=int, default=None)
@@ -93,6 +109,8 @@ def mecp(
     maxiter,
     broken_sym,
     moinp,
+    freeze_atoms,
+    invert_constraints,
     casscf_nel,
     casscf_norb,
     casscf_mult,
@@ -168,6 +186,7 @@ def mecp(
 
     mecp_settings.broken_sym = _comma_values(broken_sym)
     mecp_settings.moinp = moinp
+    mecp_settings.invert_constraints = invert_constraints
     mecp_settings.casscf_nel = casscf_nel
     mecp_settings.casscf_norb = casscf_norb
     mecp_settings.casscf_mult = _comma_values(casscf_mult)
@@ -181,7 +200,17 @@ def mecp(
 
     # get molecule from context
     molecules = ctx.obj["molecules"]
-    molecule = molecules[-1]  # get last molecule from list
+    molecule = molecules[-1].copy()  # get last molecule from list
+    if freeze_atoms is not None:
+        from chemsmart.utils.utils import (
+            convert_list_to_gaussian_frozen_list,
+            get_list_from_string_range,
+        )
+
+        frozen_atoms = get_list_from_string_range(freeze_atoms)
+        molecule.frozen_atoms = convert_list_to_gaussian_frozen_list(
+            frozen_atoms, molecule
+        )
     logger.info(f"Running ORCA MECP on molecule: {molecule}")
 
     # get label for the job output files

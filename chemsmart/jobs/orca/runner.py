@@ -361,7 +361,8 @@ class ORCAJobRunner(JobRunner):
                     destination = os.path.join(
                         self.running_directory, os.path.basename(source)
                     )
-                    copy(source, destination)
+                    if os.path.abspath(source) != os.path.abspath(destination):
+                        copy(source, destination)
 
     def _write_input(self, job):
         """

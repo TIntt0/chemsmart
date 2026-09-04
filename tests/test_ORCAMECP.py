@@ -167,6 +167,69 @@ def test_orca_official_ch3o_ch2oh_numfreq_input(
     assert "* xyz 1 3" in content
 
 
+def test_real_ch3o_ch2oh_numfreq_result():
+    output = Path(
+        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
+    ).resolve()
+    result = ORCAOutput(str(output)).mecp_result
+    assert result.numfreq_requested
+    assert result.numfreq_completed
+    assert result.is_minimum is True
+    assert len(result.state_1_frequencies) == 15
+    assert len(result.state_2_frequencies) == 15
+    assert result.state_1_frequencies[7] == pytest.approx(775.23)
+    assert result.state_2_frequencies[7] == pytest.approx(601.21)
+    assert result.state_1_imaginary_frequencies == ()
+    assert result.state_2_imaginary_frequencies == ()
+
+
+def test_numfreq_imaginary_mode_is_not_minimum(tmp_path):
+    source = Path(
+        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
+    ).read_text()
+    output = tmp_path / "mecp_imaginary.out"
+    output.write_text(source.replace("601.21 cm**-1", "-42.00 cm**-1"))
+    result = ORCAOutput(str(output)).mecp_result
+    assert result.numfreq_completed
+    assert result.state_2_imaginary_frequencies == (-42.0,)
+    assert result.is_minimum is False
+
+
+def test_mecp_solvent_constraint_and_moinp_are_written(
+    tmpdir, tmp_path, orca_jobrunner_no_scratch
+):
+    xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
+    gbw = tmp_path / "pes2.gbw"
+    gbw.write_bytes(b"test orbitals")
+    settings = mecp_settings(
+        charge=1,
+        multiplicity_a=3,
+        multiplicity_b=1,
+        solvent_model="cpcm",
+        solvent_id="water",
+        moinp=str(gbw),
+        maxiter=80,
+        invert_constraints=True,
+    )
+    job = ORCAMECPJob.from_filename(
+        filename=str(xyz),
+        settings=settings,
+        label="advanced_mecp",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    job.molecule.frozen_atoms = [-1, 0, 0, 0, 0]
+    ORCAInputWriter(job=job).write(target_directory=tmpdir)
+    content = Path(str(tmpdir), "advanced_mecp.inp").read_text()
+    assert 'moinp "pes2.gbw"' in content
+    assert Path(str(tmpdir), "pes2.gbw").read_bytes() == b"test orbitals"
+    assert "CPCM(water)" in content
+    assert content.count("%geom") == 1
+    assert (
+        "%geom\n  MaxIter 80\n  { C 0 C }\n  InvertConstraints True\nend"
+        in content
+    )
+
+
 def test_cli_rejects_equal_multiplicities(
     single_molecule_xyz_file, run_orca_and_capture_settings
 ):
@@ -269,6 +332,8 @@ def test_orca_short_a_appends_label(
                 "4",
                 "--mode",
                 "numfreq",
+                "--freeze-atoms",
+                "1",
             ],
             obj={"jobrunner": orca_jobrunner_no_scratch},
             catch_exceptions=False,
@@ -278,6 +343,7 @@ def test_orca_short_a_appends_label(
     call = job_class.call_args.kwargs
     assert call["label"].endswith("_testnumfreq")
     assert call["settings"].aux_basis is None
+    assert call["molecule"].frozen_atoms[0] == -1
 
 
 def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
@@ -318,6 +384,8 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
                 "1",
                 "--mode",
                 "numfreq",
+                "--freeze-atoms",
+                "1",
             ],
             catch_exceptions=False,
         )
@@ -329,6 +397,7 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
         ("--m1", "3"),
         ("--m2", "1"),
         ("--mode", "numfreq"),
+        ("--freeze-atoms", "1"),
     ):
         index = submitted_args.index(option)
         assert submitted_args[index + 1] == value
