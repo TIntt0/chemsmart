@@ -57,7 +57,8 @@ logger = logging.getLogger(__name__)
 @click.option(
     "--maxiter",
     type=int,
-    default=None,
+    default=200,
+    show_default=True,
     help="Maximum number of SurfCrossOpt iterations.",
 )
 @click.option(
@@ -180,10 +181,8 @@ def mecp(
     # SurfCrossOpt optimisation mode (opt or numfreq)
     mecp_settings.mode = mode.lower()
 
-    # optional: max iterations
-    if maxiter is not None:
-        mecp_settings.maxiter = maxiter
-        logger.debug(f"Set SurfCrossOpt MaxIter: {maxiter}")
+    mecp_settings.maxiter = maxiter
+    logger.debug(f"Set SurfCrossOpt MaxIter: {maxiter}")
 
     def _comma_values(value):
         if value is None:

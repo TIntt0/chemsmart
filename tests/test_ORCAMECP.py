@@ -35,6 +35,7 @@ def test_route_and_validation():
     settings = mecp_settings()
     assert settings.route_string.startswith("! Opt SurfCrossOpt")
     assert settings.validate().multiplicity == 6
+    assert settings.maxiter == 200
     with pytest.raises(ValueError, match="different"):
         mecp_settings(multiplicity_a=4, multiplicity_b=4).validate()
 

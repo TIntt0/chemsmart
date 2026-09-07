@@ -2162,7 +2162,7 @@ class ORCAMECPJobSettings(ORCAJobSettings):
         multiplicity_a=None,
         multiplicity_b=None,
         mode="opt",
-        maxiter=None,
+        maxiter=200,
         broken_sym=None,
         moinp=None,
         casscf_nel=None,
