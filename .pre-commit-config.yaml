@@ -1,23 +1,20 @@
 repos:
   - repo: local
     hooks:
-      - id: isort
-        name: Run isort on staged Python files
-        entry: isort
+      - id: make-fmt
+        name: Run make fmt
+        entry: make fmt
         language: system
-        types: [python]
-        args: [--skip, pyproject.toml, --gitignore]
-      - id: black
-        name: Run black on staged Python files
-        entry: black
+        files: \.py$
+        pass_filenames: false
+        always_run: true  # Run even if no files are staged
+      - id: make-lint
+        name: Run make lint
+        entry: make lint
         language: system
-        types: [python]
-        args: [-l, "79"]
-      - id: ruff
-        name: Run ruff on staged Python files
-        entry: ruff check --fix
-        language: system
-        types: [python]
+        files: \.py$
+        pass_filenames: false
+        always_run: true  
       - id: make-clean
         name: Run make clean
         entry: make clean
@@ -29,13 +26,12 @@ repos:
         name: Run make docs-lint
         entry: make docs-lint
         language: system
-        files: ^docs/.*\.(rst|md)$
-        pass_filenames: false
-      - id: rstfmt
-        name: Run rstfmt on staged documentation files
-        entry: rstfmt -w 120
+        always_run: true  # Run even if no files are staged
+      - id: make-docs-fmt
+        name: Run make docs fmt
+        entry: make docs-fmt
         language: system
-        files: ^docs/.*\.rst$
+        always_run: true  
       - id: make-docs-clean
         name: Run make docs clean
         entry: make docs-clean
@@ -43,4 +39,3 @@ repos:
         files: ''
         pass_filenames: false
         always_run: true 
-
