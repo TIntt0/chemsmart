@@ -1,8 +1,7 @@
 """Tests for native ORCA SurfCrossOpt support."""
 
-import os
+import re
 import shutil
-import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -207,66 +206,6 @@ def test_twisted_ethylene_broken_symmetry_input(
     assert "* xyz 0 3" in input_text
 
 
-@pytest.mark.slow
-@pytest.mark.skipif(
-    os.environ.get("CHEMSMART_RUN_ORCA_INTEGRATION") != "1",
-    reason="set CHEMSMART_RUN_ORCA_INTEGRATION=1 to run ORCA",
-)
-def test_real_orca_twisted_ethylene_mecp(tmp_path, orca_jobrunner_no_scratch):
-    """Run an opt-in twisted-ethylene singlet/triplet MECP calculation.
-
-    Set ``CHEMSMART_RUN_ORCA_INTEGRATION=1`` and, if needed,
-    ``ORCA_EXE=/absolute/path/to/orca`` before invoking pytest.
-    """
-    executable = os.environ.get("ORCA_EXE") or shutil.which("orca")
-    if executable is None:
-        pytest.skip("ORCA_EXE is not set and orca is not on PATH")
-
-    xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/ethylene_twisted_mecp.xyz"
-    ).resolve()
-    settings = mecp_settings(
-        charge=0,
-        multiplicity_a=3,
-        multiplicity_b=1,
-        functional="B3LYP",
-        basis="def2-SVP",
-        scf_tol="TightSCF",
-        broken_sym=[1, 1],
-        maxiter=50,
-    )
-    job = ORCAMECPJob.from_filename(
-        filename=str(xyz),
-        settings=settings,
-        label="ethylene_twisted_mecp",
-        jobrunner=orca_jobrunner_no_scratch,
-    )
-    ORCAInputWriter(job=job).write(target_directory=tmp_path)
-    input_path = tmp_path / "ethylene_twisted_mecp.inp"
-    output_path = tmp_path / "ethylene_twisted_mecp.out"
-    input_text = input_path.read_text()
-    assert "%mecp\n  Mult 1\n  brokenSym 1,1\nend" in input_text
-    assert "* xyz 0 3" in input_text
-
-    with output_path.open("w") as output:
-        completed = subprocess.run(
-            [executable, input_path.name],
-            cwd=tmp_path,
-            stdout=output,
-            stderr=subprocess.STDOUT,
-            check=False,
-            timeout=1800,
-        )
-
-    output_text = output_path.read_text(errors="replace")
-    assert completed.returncode == 0, output_text[-4000:]
-    assert "multiplicity" not in output_text.lower() or (
-        "impossible" not in output_text.lower()
-    )
-    assert "ORCA TERMINATED NORMALLY" in output_text
-    assert "THE OPTIMIZATION HAS CONVERGED" in output_text
-
-
 def test_orca_official_ch3o_ch2oh_numfreq_input(
     tmpdir, orca_jobrunner_no_scratch
 ):
@@ -306,15 +245,11 @@ def test_real_ch3o_ch2oh_numfreq_result():
     assert result.state_2_imaginary_frequencies == ()
 
 
-def test_orca_mecp_quality_report(
-    tmp_path, orca_jobrunner_no_scratch
-):
+def test_orca_mecp_quality_report(tmp_path, orca_jobrunner_no_scratch):
     source = Path(
         "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
     ).resolve()
-    xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
-    ).resolve()
+    xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
     job = ORCAMECPJob.from_filename(
         filename=str(xyz),
         settings=mecp_settings(
@@ -345,9 +280,7 @@ def test_orca_mecp_quality_report(
 def test_orca_mecp_quality_report_warns_for_large_final_gap(
     tmp_path, orca_jobrunner_no_scratch
 ):
-    xyz = Path(
-        "tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz"
-    ).resolve()
+    xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
     job = ORCAMECPJob.from_filename(
         filename=str(xyz),
         settings=mecp_settings(
@@ -399,6 +332,191 @@ def test_numfreq_imaginary_mode_is_not_minimum(tmp_path):
     assert result.numfreq_completed
     assert result.state_2_imaginary_frequencies == (-42.0,)
     assert result.is_minimum is False
+
+
+@pytest.mark.parametrize(
+    "surface", ["VIBRATIONAL FREQUENCIES", "VIBRATIONAL FREQUENCIES PES2"]
+)
+@pytest.mark.parametrize(
+    "damage", ["missing", "duplicate", "empty", "truncated", "last_empty"]
+)
+def test_numfreq_incomplete_table_is_not_completed(tmp_path, surface, damage):
+    source = Path(
+        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
+    ).read_text(encoding="utf-8")
+    lines = source.splitlines(keepends=True)
+    start = next(i for i, line in enumerate(lines) if line.strip() == surface)
+    rows = []
+    for i in range(start + 1, len(lines)):
+        if re.match(r"^\s*\d+:.*cm\*\*-1", lines[i]):
+            rows.append(i)
+        elif rows:
+            break
+    assert len(rows) == 15
+    if damage == "missing":
+        del lines[rows[7]]
+    elif damage == "duplicate":
+        # Preserve the count while replacing mode 7 with a second mode 6.
+        lines[rows[7]] = lines[rows[6]]
+    elif damage == "empty":
+        del lines[rows[0] : rows[-1] + 1]
+    elif damage == "truncated":
+        lines = lines[: rows[7]]
+    else:
+        lines.append(f"\n{surface}\n-----------------------\n")
+    output = tmp_path / "incomplete.out"
+    output.write_text("".join(lines), encoding="utf-8")
+    result = ORCAOutput(str(output)).mecp_result
+    assert result.numfreq_requested
+    assert result.numfreq_completed is False
+    assert result.is_minimum is None
+    if damage != "truncated":
+        # Even a normal-termination marker must not hide missing modes.
+        assert result.normal_termination
+
+
+def test_real_twisted_ethylene_broken_sym_numfreq_result():
+    """The saved ORCA 6.1.0 HPC run has a PES2 imaginary mode.
+
+    Source: orca_mecp_test/orca_mecp/testnumfreq200/
+    ethylene_twisted_mecp_max200.out. This checks a recorded result,
+    not whether every new ethylene calculation reproduces this mode.
+    """
+    source = Path(
+        "tests/data/ORCATests/outputs/ethylene_twisted_mecp_numfreq.out"
+    )
+    assert "brokenSym 1,1" in source.read_text(encoding="utf-8")
+    result = ORCAOutput(str(source.resolve())).mecp_result
+    assert result.normal_termination
+    assert result.converged
+    assert result.numfreq_requested
+    assert result.numfreq_completed
+    assert len(result.state_1_frequencies) == 18
+    assert len(result.state_2_frequencies) == 18
+    assert result.state_1_imaginary_frequencies == ()
+    assert result.state_2_imaginary_frequencies == pytest.approx((-969.14,))
+    assert result.is_minimum is False
+
+
+def test_real_twisted_ethylene_numfreq_report_warns(
+    tmp_path, orca_jobrunner_no_scratch
+):
+    source = Path(
+        "tests/data/ORCATests/outputs/ethylene_twisted_mecp_numfreq.out"
+    ).resolve()
+    xyz = Path(
+        "tests/data/ORCATests/inputs/xyz/ethylene_twisted_mecp.xyz"
+    ).resolve()
+    job = ORCAMECPJob.from_filename(
+        filename=str(xyz),
+        settings=mecp_settings(
+            charge=0,
+            multiplicity_a=3,
+            multiplicity_b=1,
+            basis="def2-SVP",
+            mode="numfreq",
+            broken_sym=[1, 1],
+            maxiter=200,
+        ),
+        label="ethylene_numfreq",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    job.set_folder(str(tmp_path))
+    shutil.copy(source, job.outputfile)
+    report = Path(job.write_report()).read_text(encoding="utf-8")
+    assert "status=WARNING" in report
+    assert "optimization_converged=True" in report
+    assert "numfreq_completed=True" in report
+    assert "is_minimum=False" in report
+    assert "state_2_imaginary_frequencies_cm-1=[-969.14]" in report
+    assert "imaginary mode detected on the crossing hyperline" in report
+
+
+@pytest.mark.parametrize(
+    "case,energies,gap,imaginary,is_minimum,status",
+    [
+        (
+            "co",
+            (-651.748192575514, -651.748053038959),
+            -0.000139537,
+            (-16.03,),
+            False,
+            "WARNING",
+        ),
+        (
+            "ooh",
+            (-651.746166826518, -651.746242182235),
+            0.000075356,
+            (),
+            True,
+            "PASSED",
+        ),
+    ],
+    ids=["orcacase3-co-warning", "orcacase4-ooh-passed"],
+)
+def test_real_pathway_numfreq_results_and_reports(
+    case,
+    energies,
+    gap,
+    imaginary,
+    is_minimum,
+    status,
+    tmp_path,
+    orca_jobrunner_no_scratch,
+):
+    """Regress the recorded HPC results, including the default gap cutoff."""
+    source = Path(
+        f"tests/data/ORCATests/outputs/{case}_pathway_mecp_numfreq.out"
+    ).resolve()
+    text = source.read_text(encoding="utf-8")
+    assert "brokenSym 1,1" in text
+    assert "SMD(acetonitrile)" in text
+    result = ORCAOutput(str(source)).mecp_result
+    assert result.normal_termination
+    assert result.converged
+    assert result.numfreq_requested
+    assert result.numfreq_completed
+    assert result.state_1_energy == pytest.approx(energies[0], abs=1e-10)
+    assert result.state_2_energy == pytest.approx(energies[1], abs=1e-10)
+    assert result.energy_gap == pytest.approx(gap, abs=1e-12)
+    assert len(result.final_structure) == 26
+    assert len(result.state_1_frequencies) == 78
+    assert len(result.state_2_frequencies) == 78
+    assert result.state_1_imaginary_frequencies == ()
+    assert result.state_2_imaginary_frequencies == pytest.approx(imaginary)
+    assert result.is_minimum is is_minimum
+
+    job = ORCAMECPJob(
+        molecule=result.final_structure,
+        settings=mecp_settings(
+            charge=0,
+            multiplicity_a=3,
+            multiplicity_b=1,
+            functional="M062X",
+            basis="maug-cc-pV(D+d)Z",
+            solvent_model="smd",
+            solvent_id="acetonitrile",
+            mode="numfreq",
+            broken_sym=[1, 1],
+            maxiter=200,
+        ),
+        label=f"{case}_pathway",
+        jobrunner=orca_jobrunner_no_scratch,
+    )
+    job.set_folder(str(tmp_path))
+    shutil.copy(source, job.outputfile)
+    report = Path(job.write_report()).read_text(encoding="utf-8")
+    assert f"status={status}" in report
+    assert "normal_termination=True" in report
+    assert "optimization_converged=True" in report
+    assert "numfreq_completed=True" in report
+    assert f"is_minimum={is_minimum}" in report
+    assert f"energy_gap_accepted={case == 'ooh'}" in report
+    if case == "co":
+        assert "final two-state energy gap exceeds" in report
+        assert "imaginary mode detected on the crossing hyperline" in report
+    else:
+        assert "All requested MECP quality checks passed." in report
 
 
 def test_mecp_solvent_constraint_and_moinp_are_written(

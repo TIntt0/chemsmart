@@ -248,8 +248,13 @@ class ORCAOutput(ORCAFileMixin):
         )
         numfreq_completed = bool(
             numfreq_requested
-            and state_1_freqs
-            and state_2_freqs
+            and structure is not None
+            and len(structure) > 0
+            and all(
+                tuple(mode for mode, _ in rows)
+                == tuple(range(3 * len(structure)))
+                for rows in self._mecp_numfreq_rows
+            )
             and self.normal_termination
         )
         imaginary_cutoff = -1.0
@@ -288,8 +293,20 @@ class ORCAOutput(ORCAFileMixin):
         ``VIBRATIONAL FREQUENCIES`` heading.  Frequencies include the seven
         projected zero modes of a non-linear MECP calculation.
         """
+        return tuple(
+            tuple(frequency for _, frequency in rows)
+            for rows in self._mecp_numfreq_rows
+        )
+
+    @cached_property
+    def _mecp_numfreq_rows(self):
+        """Keep mode indices to validate all 3N rows, including zero modes.
+
+        Use the last occurrence of each table even if it is empty. Never
+        borrow rows from a following table or an earlier completed table.
+        """
         frequency_pattern = re.compile(
-            r"^\s*\d+:\s*([-+]?\d+(?:\.\d+)?)\s+cm\*\*-1"
+            r"^\s*(\d+):\s*([-+]?\d+(?:\.\d+)?)\s+cm\*\*-1"
         )
 
         def _section(header):
@@ -299,13 +316,21 @@ class ORCAOutput(ORCAFileMixin):
                     continue
                 current = []
                 for candidate in self.contents[index + 1 :]:
+                    if candidate.strip().startswith("VIBRATIONAL FREQUENCIES"):
+                        break
                     match = frequency_pattern.match(candidate)
                     if match:
-                        current.append(float(match.group(1)))
+                        current.append(
+                            (int(match.group(1)), float(match.group(2)))
+                        )
                     elif current:
                         break
-                if current:
-                    values = current
+                    elif candidate.strip() and not (
+                        set(candidate.strip()) == {"-"}
+                        or candidate.strip().startswith("Scaling factor")
+                    ):
+                        break
+                values = current
             return tuple(values)
 
         return (
