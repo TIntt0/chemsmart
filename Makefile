@@ -24,11 +24,14 @@ else
     ECHO := echo
     NULL := /dev/null
 endif
+
 # Default to true if not explicitly set
 USE_CONDA ?= true
 MAKEFILE_DIR := $(dir $(realpath $(lastword $(MAKEFILE_LIST))))
 CHEMSMART_PATH := $(MAKEFILE_DIR)chemsmart$(SEP)cli$(SEP)chemsmart  # Use platform-specific separator
+
 # === Help messages for make ===
+
 .PHONY: help
 ifeq ($(OS_FAMILY),Windows)
 help:             ## Show the help menu.
@@ -43,6 +46,7 @@ help:             ## Show the help menu.
 	@echo "Targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-15s\033[0m %s\n", $$1, $$2}'
 endif
+
 # === Environment Setup ===
 
 .PHONY: env
@@ -63,6 +67,7 @@ else
 		$(MAKE) virtualenv; \
 	fi
 endif
+
 .PHONY: conda-env
 conda-env:  ## Create or update the Conda environment using environment.yml.
 	@echo Managing Conda environment 'chemsmart' with environment.yml...
@@ -91,6 +96,7 @@ else
 	fi
 endif
 	@echo Conda environment 'chemsmart' is ready. Activate it with 'conda activate chemsmart'.
+
 .PHONY: virtualenv
 virtualenv:  ## Create a virtual environment using virtualenv.
 ifeq ($(OS_FAMILY),Windows)
@@ -107,7 +113,9 @@ else
 	fi
 	@. venv/bin/activate && pip install -U pip
 endif
+
 # === Project Setup ===
+
 .PHONY: install
 install:          ## Install the project in user mode. Normal users (runtime only)
 	$(ENV_PREFIX)pip install .
@@ -123,6 +131,7 @@ install-dev:          ## Install the project in development mode.
 pre-commit:       ## Install pre-commit hooks to enforce code style and quality.
 	$(ENV_PREFIX)pre-commit install
 	@echo Pre-commit hooks installed. They will run automatically on each commit.
+
 .PHONY: configure
 configure:        ## Run chemsmart configuration interactively.
 ifeq ($(OS_FAMILY),Windows)
@@ -159,6 +168,7 @@ else
 	if [ -f "$${HOME}/.profile" ]; then echo "  source ~/.profile (sh / other)"; fi; \
 	echo "Or simply open a new terminal window."
 endif
+
 .PHONY: show
 show: ## Display the current environment information.
 	@echo Current environment:
@@ -169,7 +179,9 @@ else
 endif
 	$(ENV_PREFIX)python -V
 	$(ENV_PREFIX)python -m site
+
 # === Code Quality ===
+
 .PHONY: update-deps
 update-deps:          ## Automatically update new packages that are added in the codes
 	@echo Updating additional dependencies to pyproject.toml file...
@@ -181,6 +193,7 @@ update-deps:          ## Automatically update new packages that are added in the
 fmt:              ## Format code using black and isort.
 	$(ENV_PREFIX)isort --skip pyproject.toml --gitignore .
 	$(ENV_PREFIX)black -l 79 .
+
 .PHONY: lint
 lint:             ## Run linters (ruff).
 	$(ENV_PREFIX)ruff check . --fix
@@ -205,6 +218,7 @@ test: lint coverage-clean ## Run tests and generate coverage report (robust to c
 
 # === Docs ===
 .PHONY: docs-lint docs-fmt docs docs-clean
+
 docs-lint: ## Lint reStructuredText/Markdown docs with doc8 and rstcheck.
 	@echo "==> Running doc8..."
 	$(ENV_PREFIX)doc8 --max-line-length=120 --ignore-path docs/build docs/source
@@ -223,9 +237,13 @@ docs-fmt: ## Auto-format reStructuredText with rstfmt.
 
 docs: ## Build documentation (HTML).
 	+$(ENV_PREFIX)$(MAKE) -C docs html  # leading + tells GNU Make this is a recursive make; it preserves jobserver flags, etc.
+
 docs-clean: ## Clean documentation artifacts.
 	+$(ENV_PREFIX)$(MAKE) -C docs clean
+
+
 # === Cleanup ===
+
 .PHONY: clean
 clean: ## Remove temporary and unnecessary files.
 ifeq ($(OS_FAMILY),Windows)
@@ -241,6 +259,8 @@ else
 	@find ./ -name '*~' -exec rm -f {} + 2>/dev/null
 	@rm -rf .cache .pytest_cache build dist *.egg-info htmlcov .tox .coverage.* docs/_build 2>/dev/null
 endif
+
+
 # === Release ===
 REPOSITORY ?= testpypi
 PACKAGE_NAME := chemsmart
@@ -258,15 +278,18 @@ endif
 
 TWINE_REPOSITORY_URL_testpypi := https://test.pypi.org/legacy/
 TWINE_REPOSITORY_URL_pypi := https://upload.pypi.org/legacy/
+
 .PHONY: version
 version: ## Show the current package version from chemsmart/VERSION.
 	@echo $(VERSION)
+
 .PHONY: build
 build: clean ## Build source and wheel distributions.
 	@echo "Building $(PACKAGE_NAME) version $(VERSION)..."
 	$(ENV_PREFIX)python -m pip install --upgrade build twine
 	$(ENV_PREFIX)python -m build
 	$(ENV_PREFIX)python -m twine check dist/*
+
 .PHONY: check-clean
 check-clean: ## Fail if git working tree is not clean.
 ifeq ($(OS_FAMILY),Windows)
@@ -280,6 +303,7 @@ else
 		exit 1; \
 	}
 endif
+
 .PHONY: check-git-tag
 check-git-tag: ## Fail if git tag v<VERSION> already exists.
 ifeq ($(OS_FAMILY),Windows)
@@ -293,6 +317,7 @@ else
 		exit 1; \
 	} || true
 endif
+
 .PHONY: tag
 tag: check-clean check-git-tag ## Create git tag v<VERSION>.
 	@echo "Creating git tag v$(VERSION)..."
@@ -341,3 +366,4 @@ endif
 	@echo "Remember to push commits and tags:"
 	@echo "  git push"
 	@echo "  git push origin v$(VERSION)"
+
