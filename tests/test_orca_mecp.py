@@ -17,6 +17,25 @@ from chemsmart.jobs.orca.settings import ORCAMECPJobSettings
 from chemsmart.jobs.orca.writer import ORCAInputWriter
 from chemsmart.settings.orca import ORCAProjectSettings
 
+MECP_CASES_FILE = Path(
+    "tests/data/ORCATests/outputs/orca_mecp_cases.txt"
+).resolve()
+
+
+@pytest.fixture
+def mecp_case(tmp_path):
+    """Materialize one trimmed real ORCA output from the combined fixture."""
+    contents = MECP_CASES_FILE.read_text(encoding="utf-8")
+
+    def load(name):
+        marker = f"===== {name} ====="
+        section = contents.split(marker, 1)[1].split("===== END =====", 1)[0]
+        output = tmp_path / f"{name}.out"
+        output.write_text(section.strip() + "\n", encoding="utf-8")
+        return output
+
+    return load
+
 
 def mecp_settings(**kwargs):
     values = {
@@ -119,8 +138,8 @@ THE OPTIMIZATION HAS CONVERGED
     assert parsed.numfreq_requested
 
 
-def test_real_feo_stationary_point_geometry():
-    output = Path("tests/data/ORCATests/outputs/feo_plus_mecp.out").resolve()
+def test_real_feo_stationary_point_geometry(mecp_case):
+    output = mecp_case("feo_plus")
     parsed = ORCAOutput(str(output)).mecp_result
     assert parsed.converged
     assert parsed.normal_termination
@@ -229,10 +248,8 @@ def test_orca_official_ch3o_ch2oh_numfreq_input(
     assert "* xyz 1 3" in content
 
 
-def test_real_ch3o_ch2oh_numfreq_result():
-    output = Path(
-        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
-    ).resolve()
+def test_real_ch3o_ch2oh_numfreq_result(mecp_case):
+    output = mecp_case("ch3o_ch2oh_numfreq")
     result = ORCAOutput(str(output)).mecp_result
     assert result.numfreq_requested
     assert result.numfreq_completed
@@ -245,10 +262,10 @@ def test_real_ch3o_ch2oh_numfreq_result():
     assert result.state_2_imaginary_frequencies == ()
 
 
-def test_orca_mecp_quality_report(tmp_path, orca_jobrunner_no_scratch):
-    source = Path(
-        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
-    ).resolve()
+def test_orca_mecp_quality_report(
+    tmp_path, orca_jobrunner_no_scratch, mecp_case
+):
+    source = mecp_case("ch3o_ch2oh_numfreq")
     xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
     job = ORCAMECPJob.from_filename(
         filename=str(xyz),
@@ -322,10 +339,8 @@ def test_orca_runner_writes_mecp_report_after_run(
     job.write_report.assert_called_once_with()
 
 
-def test_numfreq_imaginary_mode_is_not_minimum(tmp_path):
-    source = Path(
-        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
-    ).read_text()
+def test_numfreq_imaginary_mode_is_not_minimum(tmp_path, mecp_case):
+    source = mecp_case("ch3o_ch2oh_numfreq").read_text()
     output = tmp_path / "mecp_imaginary.out"
     output.write_text(source.replace("601.21 cm**-1", "-42.00 cm**-1"))
     result = ORCAOutput(str(output)).mecp_result
@@ -340,10 +355,10 @@ def test_numfreq_imaginary_mode_is_not_minimum(tmp_path):
 @pytest.mark.parametrize(
     "damage", ["missing", "duplicate", "empty", "truncated", "last_empty"]
 )
-def test_numfreq_incomplete_table_is_not_completed(tmp_path, surface, damage):
-    source = Path(
-        "tests/data/ORCATests/outputs/ch3o_ch2oh_mecp_numfreq.out"
-    ).read_text(encoding="utf-8")
+def test_numfreq_incomplete_table_is_not_completed(
+    tmp_path, surface, damage, mecp_case
+):
+    source = mecp_case("ch3o_ch2oh_numfreq").read_text(encoding="utf-8")
     lines = source.splitlines(keepends=True)
     start = next(i for i, line in enumerate(lines) if line.strip() == surface)
     rows = []
@@ -375,16 +390,14 @@ def test_numfreq_incomplete_table_is_not_completed(tmp_path, surface, damage):
         assert result.normal_termination
 
 
-def test_real_twisted_ethylene_broken_sym_numfreq_result():
+def test_real_twisted_ethylene_broken_sym_numfreq_result(mecp_case):
     """The saved ORCA 6.1.0 HPC run has a PES2 imaginary mode.
 
     Source: orca_mecp_test/orca_mecp/testnumfreq200/
     ethylene_twisted_mecp_max200.out. This checks a recorded result,
     not whether every new ethylene calculation reproduces this mode.
     """
-    source = Path(
-        "tests/data/ORCATests/outputs/ethylene_twisted_mecp_numfreq.out"
-    )
+    source = mecp_case("ethylene_twisted_numfreq")
     assert "brokenSym 1,1" in source.read_text(encoding="utf-8")
     result = ORCAOutput(str(source.resolve())).mecp_result
     assert result.normal_termination
@@ -399,11 +412,9 @@ def test_real_twisted_ethylene_broken_sym_numfreq_result():
 
 
 def test_real_twisted_ethylene_numfreq_report_warns(
-    tmp_path, orca_jobrunner_no_scratch
+    tmp_path, orca_jobrunner_no_scratch, mecp_case
 ):
-    source = Path(
-        "tests/data/ORCATests/outputs/ethylene_twisted_mecp_numfreq.out"
-    ).resolve()
+    source = mecp_case("ethylene_twisted_numfreq")
     xyz = Path(
         "tests/data/ORCATests/inputs/xyz/ethylene_twisted_mecp.xyz"
     ).resolve()
@@ -463,11 +474,10 @@ def test_real_pathway_numfreq_results_and_reports(
     status,
     tmp_path,
     orca_jobrunner_no_scratch,
+    mecp_case,
 ):
     """Regress the recorded HPC results, including the default gap cutoff."""
-    source = Path(
-        f"tests/data/ORCATests/outputs/{case}_pathway_mecp_numfreq.out"
-    ).resolve()
+    source = mecp_case(f"{case}_pathway_numfreq")
     text = source.read_text(encoding="utf-8")
     assert "brokenSym 1,1" in text
     assert "SMD(acetonitrile)" in text
