@@ -575,9 +575,9 @@ def test_cli_rejects_equal_multiplicities(
             "-f",
             single_molecule_xyz_file,
             "mecp",
-            "--m1",
+            "--multiplicity-1",
             "4",
-            "--m2",
+            "--multiplicity-2",
             "4",
             "--charge",
             "1",
@@ -612,9 +612,9 @@ def test_cli_rejects_nonpositive_multiplicities(
             "-c",
             "1",
             "mecp",
-            "--m1",
+            "-m1",
             m1,
-            "--m2",
+            "-m2",
             m2,
         ],
     )
@@ -622,7 +622,9 @@ def test_cli_rejects_nonpositive_multiplicities(
     assert expected in result.output
 
 
-@pytest.mark.parametrize("args", [["--m1", "6"], ["--m2", "4"], []])
+@pytest.mark.parametrize(
+    "args", [["--multiplicity-1", "6"], ["--multiplicity-2", "4"], []]
+)
 def test_cli_requires_both_multiplicities(
     single_molecule_xyz_file, run_orca_and_capture_settings, args
 ):
@@ -660,9 +662,9 @@ def test_orca_short_a_appends_label(
                 "-c",
                 "1",
                 "mecp",
-                "--m1",
+                "-m1",
                 "6",
-                "--m2",
+                "-m2",
                 "4",
                 "--mode",
                 "numfreq",
@@ -712,9 +714,9 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
                 "-b",
                 "TZVP",
                 "mecp",
-                "--m1",
+                "--multiplicity-1",
                 "3",
-                "--m2",
+                "--multiplicity-2",
                 "1",
                 "--mode",
                 "numfreq",
@@ -728,8 +730,8 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
     submitted_args = submit.call_args.kwargs["cli_args"]
     for option, value in (
         ("--append-label", "testnumfreq"),
-        ("--m1", "3"),
-        ("--m2", "1"),
+        ("--multiplicity-1", "3"),
+        ("--multiplicity-2", "1"),
         ("--mode", "numfreq"),
         ("--freeze-atoms", "1"),
     ):
@@ -738,7 +740,7 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
     assert "--aux-basis" not in submitted_args
 
 
-def test_cli_m1_m2_options(
+def test_cli_numbered_state_options(
     single_molecule_xyz_file,
     run_orca_and_capture_settings,
     orca_jobrunner_no_scratch,
@@ -753,9 +755,9 @@ def test_cli_m1_m2_options(
             "-c",
             "1",
             "mecp",
-            "--m1",
+            "-m1",
             "6",
-            "--m2",
+            "-m2",
             "4",
         ],
         ctx_obj={"jobrunner": orca_jobrunner_no_scratch},

@@ -7,8 +7,8 @@ using the native ``SurfCrossOpt`` feature.  Unlike the Gaussian MECP driver
 SurfCrossOpt performs the entire crossing-seam optimisation internally in
 a single ORCA invocation.
 
-The two spin states must share the same charge and level of theory; their
-multiplicities are specified via ``--m1`` and ``--m2``.
+The two spin states must share the same charge and level of theory. Their
+multiplicities are specified with the numbered state options.
 """
 
 import logging
@@ -30,14 +30,18 @@ logger = logging.getLogger(__name__)
 @click_job_options
 @click_orca_solvent_options
 @click.option(
-    "--m1",
+    "--multiplicity-1",
+    "-m1",
+    "multiplicity_1",
     type=click.IntRange(min=1),
     default=None,
     required=True,
     help="PES1 spin multiplicity; written to the * xyz line (required).",
 )
 @click.option(
-    "--m2",
+    "--multiplicity-2",
+    "-m2",
+    "multiplicity_2",
     type=click.IntRange(min=1),
     default=None,
     required=True,
@@ -67,7 +71,7 @@ logger = logging.getLogger(__name__)
     help=(
         "PES2 broken-symmetry pair NA,NB: unpaired electrons on two "
         "antiferromagnetically coupled centres. For example, 1,1 produces "
-        "an open-shell singlet and therefore requires --m2 1."
+        "an open-shell singlet and therefore requires --multiplicity-2 1."
     ),
 )
 @click.option(
@@ -110,8 +114,8 @@ def mecp(
     solvent_id,
     solvent_options,
     solventfilename,
-    m1,
-    m2,
+    multiplicity_1,
+    multiplicity_2,
     mode,
     maxiter,
     broken_sym,
@@ -173,10 +177,11 @@ def mecp(
     # SurfCrossOpt-specific fields on top of the inherited project settings
     mecp_settings = ORCAMECPJobSettings.from_settings(mecp_project_settings)
 
-    # required: two state multiplicities
-    mecp_settings.multiplicity_a = m1
-    mecp_settings.multiplicity_b = m2
-    mecp_settings.multiplicity = m1
+    # The two surfaces have independent multiplicities but ORCA SurfCrossOpt
+    # requires them to share one charge and one level of theory.
+    mecp_settings.multiplicity_a = multiplicity_1
+    mecp_settings.multiplicity_b = multiplicity_2
+    mecp_settings.multiplicity = multiplicity_1
 
     # SurfCrossOpt optimisation mode (opt or numfreq)
     mecp_settings.mode = mode.lower()

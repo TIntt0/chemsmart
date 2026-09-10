@@ -86,7 +86,7 @@ class ORCAMECPJob(ORCAJob):
             raise ValueError(
                 f"brokenSym {unpaired_a},{unpaired_b} generates PES2 "
                 "multiplicity "
-                f"{broken_sym_multiplicity}, but --m2 is "
+                f"{broken_sym_multiplicity}, but --multiplicity-2/-m2 is "
                 f"{self.settings.multiplicity_b}."
             )
 
@@ -150,7 +150,9 @@ class ORCAMECPJob(ORCAJob):
                 "final two-state energy gap exceeds the acceptance tolerance"
             )
         if result.numfreq_requested and not result.numfreq_completed:
-            issues.append("requested SurfCrossNumFreq calculation is incomplete")
+            issues.append(
+                "requested SurfCrossNumFreq calculation is incomplete"
+            )
         elif result.numfreq_completed and result.is_minimum is False:
             issues.append("imaginary mode detected on the crossing hyperline")
 
