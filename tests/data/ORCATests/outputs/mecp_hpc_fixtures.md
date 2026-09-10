@@ -1,10 +1,23 @@
 # MECP HPC regression outputs
 
-These unmodified ORCA output files were supplied from
+These trimmed excerpts of real ORCA output files were supplied from
 `C:/Users/tintt/year1/mecp/orca_mecp_test/orca_mecp`.
 Each output includes the echoed input and ORCA version. Tests parse these
 recorded calculations without launching ORCA. Their assertions describe the
 saved runs, not a requirement that every new calculation reproduce them.
+
+Retained lines are unchanged and remain in their original order. Comments
+mark omitted sections. The excerpts retain the echoed input, ORCA version,
+atom counts, convergence and termination markers, energy and gap history,
+final stationary-point and subsequent coordinate tables, and both complete
+frequency tables in their original order. Intermediate SCF details,
+optimization geometries, and normal-mode vectors are omitted.
+
+The complete original files remain in the source directory above. These
+excerpts are parser/report fixtures, not complete calculation archives or
+inputs for vibrational-mode visualization. Parsed energies, gap history,
+final geometry, frequencies, and completion assessments were compared with
+the full outputs when trimming and remain unchanged.
 
 | Fixture | Original relative path | Expected assessment |
 | --- | --- | --- |
