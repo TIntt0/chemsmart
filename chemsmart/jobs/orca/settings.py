@@ -2145,8 +2145,8 @@ class ORCAMECPJobSettings(ORCAJobSettings):
     Gaussian SP+forces sub-jobs per Python-driven step).
 
     Attributes:
-        multiplicity_a (int | None): Spin multiplicity of state A.
-        multiplicity_b (int | None): Spin multiplicity of state B.
+        multiplicity1 (int | None): Spin multiplicity of state 1.
+        multiplicity2 (int | None): Spin multiplicity of state 2.
         mode (str): ``"opt"`` (default) uses ``SurfCrossOpt``,
             ``"numfreq"`` uses ``SurfCrossOpt SurfCrossNumFreq`` for numerical
             frequency verification on the converged geometry.
@@ -2159,8 +2159,8 @@ class ORCAMECPJobSettings(ORCAJobSettings):
 
     def __init__(
         self,
-        multiplicity_a=None,
-        multiplicity_b=None,
+        multiplicity1=None,
+        multiplicity2=None,
         mode="opt",
         maxiter=200,
         broken_sym=None,
@@ -2179,8 +2179,8 @@ class ORCAMECPJobSettings(ORCAJobSettings):
                 f"ORCAMECPJobSettings.mode must be one of {sorted(self.MODES)}, "
                 f"got {mode!r}."
             )
-        self.multiplicity_a = multiplicity_a
-        self.multiplicity_b = multiplicity_b
+        self.multiplicity1 = multiplicity1
+        self.multiplicity2 = multiplicity2
         self.mode = mode
         self.maxiter = maxiter
         self.broken_sym = broken_sym
@@ -2195,11 +2195,11 @@ class ORCAMECPJobSettings(ORCAJobSettings):
         """Validate the two surfaces required by native ORCA MECP."""
         if self.charge is None:
             raise ValueError("ORCA MECP requires a charge.")
-        if self.multiplicity_a is None or self.multiplicity_b is None:
+        if self.multiplicity1 is None or self.multiplicity2 is None:
             raise ValueError("ORCA MECP requires two multiplicities.")
-        if self.multiplicity_a <= 0 or self.multiplicity_b <= 0:
+        if self.multiplicity1 <= 0 or self.multiplicity2 <= 0:
             raise ValueError("ORCA MECP multiplicities must be positive.")
-        if self.multiplicity_a == self.multiplicity_b:
+        if self.multiplicity1 == self.multiplicity2:
             raise ValueError(
                 "ORCA MECP requires two different multiplicities."
             )
@@ -2218,7 +2218,7 @@ class ORCAMECPJobSettings(ORCAJobSettings):
                 "CASSCF MECP requires both casscf_nel and casscf_norb."
             )
         # PES1 is the state on the coordinate line; keep one source of truth.
-        self.multiplicity = self.multiplicity_a
+        self.multiplicity = self.multiplicity1
         return self
 
     @classmethod

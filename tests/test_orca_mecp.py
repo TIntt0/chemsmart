@@ -40,8 +40,8 @@ def mecp_case(tmp_path):
 def mecp_settings(**kwargs):
     values = {
         "charge": 1,
-        "multiplicity_a": 6,
-        "multiplicity_b": 4,
+        "multiplicity1": 6,
+        "multiplicity2": 4,
         "functional": "B3LYP",
         "basis": "TZVP",
     }
@@ -55,7 +55,7 @@ def test_route_and_validation():
     assert settings.validate().multiplicity == 6
     assert settings.maxiter == 200
     with pytest.raises(ValueError, match="different"):
-        mecp_settings(multiplicity_a=4, multiplicity_b=4).validate()
+        mecp_settings(multiplicity1=4, multiplicity2=4).validate()
 
 
 def test_numfreq_and_custom_route():
@@ -77,8 +77,8 @@ def test_feo_official_example_input(
     )
     settings = ORCAMECPJobSettings.from_settings(project.opt_settings())
     settings.charge = 1
-    settings.multiplicity_a = 6
-    settings.multiplicity_b = 4
+    settings.multiplicity1 = 6
+    settings.multiplicity2 = 4
     settings.maxiter = 200
     settings.validate()
     feo_xyz = Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
@@ -188,7 +188,7 @@ def test_broken_symmetry_rejects_incompatible_electron_parity(
                 Path("tests/data/ORCATests/inputs/xyz/feo_plus.xyz").resolve()
             ),
             settings=mecp_settings(
-                multiplicity_b=1,
+                multiplicity2=1,
                 broken_sym=[1, 1],
             ),
             label="invalid_feo_broken_symmetry_parity",
@@ -207,8 +207,8 @@ def test_twisted_ethylene_broken_symmetry_input(
         ),
         settings=mecp_settings(
             charge=0,
-            multiplicity_a=3,
-            multiplicity_b=1,
+            multiplicity1=3,
+            multiplicity2=1,
             functional="B3LYP",
             basis="def2-SVP",
             scf_tol="TightSCF",
@@ -231,8 +231,8 @@ def test_orca_official_ch3o_ch2oh_numfreq_input(
     xyz = Path("tests/data/ORCATests/inputs/xyz/ch3o_ch2oh_mecp.xyz").resolve()
     settings = mecp_settings(
         charge=1,
-        multiplicity_a=3,
-        multiplicity_b=1,
+        multiplicity1=3,
+        multiplicity2=1,
         mode="numfreq",
     )
     job = ORCAMECPJob.from_filename(
@@ -271,8 +271,8 @@ def test_orca_mecp_quality_report(
         filename=str(xyz),
         settings=mecp_settings(
             charge=1,
-            multiplicity_a=3,
-            multiplicity_b=1,
+            multiplicity1=3,
+            multiplicity2=1,
             mode="numfreq",
         ),
         label="ch3o_ch2oh_mecp",
@@ -281,7 +281,7 @@ def test_orca_mecp_quality_report(
     job.set_folder(str(tmp_path))
     shutil.copy(source, job.outputfile)
 
-    report_path = job.write_report(energy_gap_tolerance=2.0e-4)
+    report_path = job.log_result(energy_gap_tolerance=2.0e-4)
     report = Path(report_path).read_text(encoding="utf-8")
 
     assert Path(report_path).name == "ch3o_ch2oh_mecp_report.log"
@@ -302,8 +302,8 @@ def test_orca_mecp_quality_report_warns_for_large_final_gap(
         filename=str(xyz),
         settings=mecp_settings(
             charge=1,
-            multiplicity_a=3,
-            multiplicity_b=1,
+            multiplicity1=3,
+            multiplicity2=1,
         ),
         label="large_gap_mecp",
         jobrunner=orca_jobrunner_no_scratch,
@@ -321,7 +321,7 @@ THE OPTIMIZATION HAS CONVERGED
         encoding="utf-8",
     )
 
-    report = Path(job.write_report()).read_text(encoding="utf-8")
+    report = Path(job.log_result()).read_text(encoding="utf-8")
 
     assert "status=WARNING" in report
     assert "energy_gap_accepted=False" in report
@@ -336,7 +336,7 @@ def test_orca_runner_writes_mecp_report_after_run(
 
     orca_jobrunner_no_scratch._postrun(job)
 
-    job.write_report.assert_called_once_with()
+    job.log_result.assert_called_once_with()
 
 
 def test_numfreq_imaginary_mode_is_not_minimum(tmp_path, mecp_case):
@@ -422,8 +422,8 @@ def test_real_twisted_ethylene_numfreq_report_warns(
         filename=str(xyz),
         settings=mecp_settings(
             charge=0,
-            multiplicity_a=3,
-            multiplicity_b=1,
+            multiplicity1=3,
+            multiplicity2=1,
             basis="def2-SVP",
             mode="numfreq",
             broken_sym=[1, 1],
@@ -434,7 +434,7 @@ def test_real_twisted_ethylene_numfreq_report_warns(
     )
     job.set_folder(str(tmp_path))
     shutil.copy(source, job.outputfile)
-    report = Path(job.write_report()).read_text(encoding="utf-8")
+    report = Path(job.log_result()).read_text(encoding="utf-8")
     assert "status=WARNING" in report
     assert "optimization_converged=True" in report
     assert "numfreq_completed=True" in report
@@ -500,8 +500,8 @@ def test_real_pathway_numfreq_results_and_reports(
         molecule=result.final_structure,
         settings=mecp_settings(
             charge=0,
-            multiplicity_a=3,
-            multiplicity_b=1,
+            multiplicity1=3,
+            multiplicity2=1,
             functional="M062X",
             basis="maug-cc-pV(D+d)Z",
             solvent_model="smd",
@@ -515,7 +515,7 @@ def test_real_pathway_numfreq_results_and_reports(
     )
     job.set_folder(str(tmp_path))
     shutil.copy(source, job.outputfile)
-    report = Path(job.write_report()).read_text(encoding="utf-8")
+    report = Path(job.log_result()).read_text(encoding="utf-8")
     assert f"status={status}" in report
     assert "normal_termination=True" in report
     assert "optimization_converged=True" in report
@@ -537,8 +537,8 @@ def test_mecp_solvent_constraint_and_moinp_are_written(
     gbw.write_bytes(b"test orbitals")
     settings = mecp_settings(
         charge=1,
-        multiplicity_a=3,
-        multiplicity_b=1,
+        multiplicity1=3,
+        multiplicity2=1,
         solvent_model="cpcm",
         solvent_id="water",
         moinp=str(gbw),
@@ -575,9 +575,9 @@ def test_cli_rejects_equal_multiplicities(
             "-f",
             single_molecule_xyz_file,
             "mecp",
-            "--multiplicity-1",
+            "--multiplicity1",
             "4",
-            "--multiplicity-2",
+            "--multiplicity2",
             "4",
             "--charge",
             "1",
@@ -612,9 +612,9 @@ def test_cli_rejects_nonpositive_multiplicities(
             "-c",
             "1",
             "mecp",
-            "-m1",
+            "--multiplicity1",
             m1,
-            "-m2",
+            "--multiplicity2",
             m2,
         ],
     )
@@ -623,7 +623,7 @@ def test_cli_rejects_nonpositive_multiplicities(
 
 
 @pytest.mark.parametrize(
-    "args", [["--multiplicity-1", "6"], ["--multiplicity-2", "4"], []]
+    "args", [["--multiplicity1", "6"], ["--multiplicity2", "4"], []]
 )
 def test_cli_requires_both_multiplicities(
     single_molecule_xyz_file, run_orca_and_capture_settings, args
@@ -662,9 +662,9 @@ def test_orca_short_a_appends_label(
                 "-c",
                 "1",
                 "mecp",
-                "-m1",
+                "--multiplicity1",
                 "6",
-                "-m2",
+                "--multiplicity2",
                 "4",
                 "--mode",
                 "numfreq",
@@ -714,9 +714,9 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
                 "-b",
                 "TZVP",
                 "mecp",
-                "--multiplicity-1",
+                "--multiplicity1",
                 "3",
-                "--multiplicity-2",
+                "--multiplicity2",
                 "1",
                 "--mode",
                 "numfreq",
@@ -730,8 +730,8 @@ def test_sub_preserves_mecp_arguments(orca_jobrunner_no_scratch):
     submitted_args = submit.call_args.kwargs["cli_args"]
     for option, value in (
         ("--append-label", "testnumfreq"),
-        ("--multiplicity-1", "3"),
-        ("--multiplicity-2", "1"),
+        ("--multiplicity1", "3"),
+        ("--multiplicity2", "1"),
         ("--mode", "numfreq"),
         ("--freeze-atoms", "1"),
     ):
@@ -755,14 +755,14 @@ def test_cli_numbered_state_options(
             "-c",
             "1",
             "mecp",
-            "-m1",
+            "--multiplicity1",
             "6",
-            "-m2",
+            "--multiplicity2",
             "4",
         ],
         ctx_obj={"jobrunner": orca_jobrunner_no_scratch},
     )
     assert result.exit_code == 0, result.output
     assert settings.multiplicity == 6
-    assert settings.multiplicity_a == 6
-    assert settings.multiplicity_b == 4
+    assert settings.multiplicity1 == 6
+    assert settings.multiplicity2 == 4

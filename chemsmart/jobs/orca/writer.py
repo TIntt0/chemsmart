@@ -1015,13 +1015,13 @@ class ORCAInputWriter(InputWriter):
             return
 
         s = self.settings
-        # Need at least one of (multiplicity_a, multiplicity_b) — the
+        # Need at least one of (multiplicity1, multiplicity2) — the
         # * xyz multiplicity (PES1) is inherited from project settings.
         # PES2 multiplicity is the one that goes into %mecp Mult.
         s.validate()
 
         f.write("%mecp\n")
-        f.write(f"  Mult {s.multiplicity_b}\n")
+        f.write(f"  Mult {s.multiplicity2}\n")
         if s.moinp is not None:
             f.write(f'  moinp "{os.path.basename(s.moinp)}"\n')
         if s.broken_sym is not None:

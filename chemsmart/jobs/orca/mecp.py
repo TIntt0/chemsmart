@@ -82,12 +82,12 @@ class ORCAMECPJob(ORCAJob):
 
         unpaired_a, unpaired_b = broken_sym
         broken_sym_multiplicity = abs(unpaired_a - unpaired_b) + 1
-        if broken_sym_multiplicity != self.settings.multiplicity_b:
+        if broken_sym_multiplicity != self.settings.multiplicity2:
             raise ValueError(
                 f"brokenSym {unpaired_a},{unpaired_b} generates PES2 "
                 "multiplicity "
-                f"{broken_sym_multiplicity}, but --multiplicity-2/-m2 is "
-                f"{self.settings.multiplicity_b}."
+                f"{broken_sym_multiplicity}, but --multiplicity2 is "
+                f"{self.settings.multiplicity2}."
             )
 
         periodic_table = PeriodicTable()
@@ -111,7 +111,7 @@ class ORCAMECPJob(ORCAJob):
         """Path to the concise, user-facing MECP quality report."""
         return os.path.join(self.folder, f"{self.label}_report.log")
 
-    def write_report(self, energy_gap_tolerance=None):
+    def log_result(self, energy_gap_tolerance=None):
         """Write a concise quality report for a completed ORCA MECP job.
 
         ORCA remains responsible for the optimization and frequency

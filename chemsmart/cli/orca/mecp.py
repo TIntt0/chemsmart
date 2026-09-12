@@ -30,18 +30,14 @@ logger = logging.getLogger(__name__)
 @click_job_options
 @click_orca_solvent_options
 @click.option(
-    "--multiplicity-1",
-    "-m1",
-    "multiplicity_1",
+    "--multiplicity1",
     type=click.IntRange(min=1),
     default=None,
     required=True,
     help="PES1 spin multiplicity; written to the * xyz line (required).",
 )
 @click.option(
-    "--multiplicity-2",
-    "-m2",
-    "multiplicity_2",
+    "--multiplicity2",
     type=click.IntRange(min=1),
     default=None,
     required=True,
@@ -71,7 +67,7 @@ logger = logging.getLogger(__name__)
     help=(
         "PES2 broken-symmetry pair NA,NB: unpaired electrons on two "
         "antiferromagnetically coupled centres. For example, 1,1 produces "
-        "an open-shell singlet and therefore requires --multiplicity-2 1."
+        "an open-shell singlet and therefore requires --multiplicity2 1."
     ),
 )
 @click.option(
@@ -114,8 +110,8 @@ def mecp(
     solvent_id,
     solvent_options,
     solventfilename,
-    multiplicity_1,
-    multiplicity_2,
+    multiplicity1,
+    multiplicity2,
     mode,
     maxiter,
     broken_sym,
@@ -179,9 +175,9 @@ def mecp(
 
     # The two surfaces have independent multiplicities but ORCA SurfCrossOpt
     # requires them to share one charge and one level of theory.
-    mecp_settings.multiplicity_a = multiplicity_1
-    mecp_settings.multiplicity_b = multiplicity_2
-    mecp_settings.multiplicity = multiplicity_1
+    mecp_settings.multiplicity1 = multiplicity1
+    mecp_settings.multiplicity2 = multiplicity2
+    mecp_settings.multiplicity = multiplicity1
 
     # SurfCrossOpt optimisation mode (opt or numfreq)
     mecp_settings.mode = mode.lower()
