@@ -1227,6 +1227,40 @@ class TestGaussianCLIMecpCommand:
         assert result.exit_code != 0
         assert "Invalid value for '--step-size-method'" in result.output
 
+    def test_mecp_restart_and_frequency_options_are_forwarded(
+        self,
+        single_molecule_xyz_file,
+        gaussian_jobrunner_no_scratch,
+        make_cli_ctx_obj,
+        run_gaussian_and_capture_settings,
+    ):
+        result, settings = run_gaussian_and_capture_settings(
+            "chemsmart.jobs.gaussian.mecp.GaussianMECPJob",
+            [
+                "-p",
+                "gas_solv",
+                "-f",
+                single_molecule_xyz_file,
+                "-c",
+                "0",
+                "-m",
+                "1",
+                "mecp",
+                "--no-restart",
+                "--verify-seam-minimum",
+                "--mecp-numfreq",
+                "--hess-step-size",
+                "0.002",
+            ],
+            make_cli_ctx_obj(gaussian_jobrunner_no_scratch),
+        )
+
+        assert result.exit_code == 0, result.output
+        assert settings.restart is False
+        assert settings.verify_seam_minimum is True
+        assert settings.mecp_numfreq is True
+        assert settings.hess_step_size == 0.002
+
 
 class TestGaussianCLILinkMecpCommand:
     """CLI tests for ``link -j mecp`` (broken-symmetry MECP via link sub-jobs)."""

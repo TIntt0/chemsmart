@@ -11,7 +11,11 @@ from chemsmart.cli.gaussian.mecp_options import add_mecp_method_suffix
 from chemsmart.io.gaussian.output import Gaussian16Output
 from chemsmart.jobs.gaussian.mecp import GaussianMECPJob
 from chemsmart.jobs.gaussian.runner import GaussianJobRunner
-from chemsmart.jobs.gaussian.settings import GaussianMECPJobSettings
+from chemsmart.jobs.gaussian.settings import (
+    GaussianJobSettings,
+    GaussianLinkJobSettings,
+    GaussianMECPJobSettings,
+)
 from chemsmart.jobs.gaussian.writer import GaussianInputWriter
 
 
@@ -41,6 +45,11 @@ def test_gaussian_spin_squared_parser_returns_final_values():
 
     assert output.spin_squared_before_annihilation == pytest.approx(2.0550)
     assert output.spin_squared_after_annihilation == pytest.approx(2.0015)
+
+    output.__dict__["contents"] = ["no spin contamination data"]
+    output.__dict__.pop("_final_spin_squared_values", None)
+    assert output.spin_squared_before_annihilation is None
+    assert output.spin_squared_after_annihilation is None
 
 
 def test_gaussian_header_reuses_rolling_checkpoint():
@@ -171,17 +180,11 @@ def test_projected_mecp_frequencies_have_3n_minus_7_modes():
         symbols=["H", "H", "H"],
         most_abundant_masses=np.ones(3),
     )
-    positions = np.array(
-        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
-    )
-    diff_grad = np.array(
-        [[1.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]
-    )
+    positions = np.array([[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+    diff_grad = np.array([[1.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
 
     frequencies, modes, eigenvalues, n_projected = (
-        job._projected_frequencies_and_modes(
-            np.eye(9), positions, diff_grad
-        )
+        job._projected_frequencies_and_modes(np.eye(9), positions, diff_grad)
     )
 
     assert n_projected == 7
@@ -353,7 +356,10 @@ def test_seam_check_uses_same_tolerance_with_and_without_frequencies():
     job._lagrangian_hessian = lambda *args: (np.eye(9), 0.5)
     job._build_projection_vectors = lambda *args: []
     job._projected_frequencies_and_modes = lambda *args: (
-        np.array([-10.0]), np.zeros((1, 9)), np.array([-4e-6]), 7
+        np.array([-10.0]),
+        np.zeros((1, 9)),
+        np.array([-4e-6]),
+        7,
     )
     job._write_seam_check_log = lambda *args: None
     job._write_mecp_frequency_log = lambda *args: None
@@ -499,3 +505,274 @@ def test_bb_step_uses_only_seam_tangent_displacement():
 )
 def test_add_mecp_method_suffix(label, method, expected):
     assert add_mecp_method_suffix(label, method) == expected
+
+
+def test_mecp_settings_presets_and_explicit_overrides():
+    tight = GaussianMECPJobSettings(convergence_preset="tight")
+    overridden = GaussianMECPJobSettings(
+        convergence_preset="tight",
+        energy_diff_tol=9.0e-5,
+        trust_radius=0.25,
+    )
+
+    assert tight.energy_diff_tol == pytest.approx(1.0e-5)
+    assert tight.force_rms_tol == pytest.approx(1.0e-4)
+    assert tight.trust_radius == pytest.approx(0.1)
+    assert overridden.energy_diff_tol == pytest.approx(9.0e-5)
+    assert overridden.trust_radius == pytest.approx(0.25)
+
+    with pytest.raises(ValueError, match="Unknown convergence_preset"):
+        GaussianMECPJobSettings(convergence_preset="extreme")
+
+
+def test_mecp_settings_are_copied_from_generic_settings():
+    generic = GaussianJobSettings(
+        functional="pbe0",
+        basis="def2svp",
+        charge=1,
+        multiplicity=2,
+    )
+
+    converted = GaussianMECPJobSettings.from_settings(generic)
+    copied = GaussianMECPJobSettings.from_settings(converted)
+
+    assert converted.functional == "pbe0"
+    assert converted.basis == "def2svp"
+    assert copied == converted
+    assert copied is not converted
+
+
+@pytest.mark.parametrize("use_link", [False, True])
+def test_state_settings_build_force_jobs_with_nosymm(use_link):
+    job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(
+        use_link=use_link,
+        additional_route_parameters="scf=xqc",
+        stable="qrhf",
+        guess="mix",
+    )
+
+    state_settings = job._state_settings(1, 2, "state A")
+
+    expected_type = (
+        GaussianLinkJobSettings if use_link else GaussianJobSettings
+    )
+    assert isinstance(state_settings, expected_type)
+    assert state_settings.jobtype == "sp"
+    assert state_settings.forces is True
+    assert state_settings.freq is False
+    assert state_settings.numfreq is False
+    assert state_settings.charge == 1
+    assert state_settings.multiplicity == 2
+    assert "nosymm" in state_settings.additional_route_parameters.lower()
+    if use_link:
+        assert state_settings.link is True
+        assert state_settings.stable == "qrhf"
+        assert state_settings.guess == "mix"
+
+
+def test_optimizer_state_rejects_symbols_and_coordinate_shape(tmp_path):
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "restartable"
+    job.molecule = SimpleNamespace(
+        symbols=["H", "H"], positions=np.zeros((2, 3))
+    )
+    job.settings = SimpleNamespace(step_size_method="bb")
+    state = dict(
+        next_step=2,
+        positions_bohr=np.zeros((2, 3)),
+        current_step_size=0.1,
+        prev_merit=1.0,
+        prev_positions=np.zeros((2, 3)),
+        prev_proj_grad=np.ones((2, 3)),
+        inv_hessian=None,
+        prev_eff_grad=None,
+        prev_positions_bfgs=None,
+    )
+    job._save_optimizer_state(**state)
+
+    job.molecule.symbols = ["H", "He"]
+    with pytest.raises(RuntimeError, match="atom symbols differ"):
+        job._load_optimizer_state()
+
+    job.molecule.symbols = ["H", "H"]
+    job.molecule.positions = np.zeros((1, 3))
+    with pytest.raises(RuntimeError, match="coordinate shape differs"):
+        job._load_optimizer_state()
+
+
+def test_trust_radius_scales_only_atoms_that_exceed_limit():
+    job = object.__new__(GaussianMECPJob)
+    job.settings = SimpleNamespace(trust_radius=0.5)
+
+    limited = job._apply_trust_radius(
+        np.array([[3.0, 4.0, 0.0], [0.1, 0.2, 0.0]])
+    )
+
+    np.testing.assert_allclose(limited[0], [0.3, 0.4, 0.0])
+    np.testing.assert_allclose(limited[1], [0.1, 0.2, 0.0])
+
+
+def test_convergence_requires_every_threshold():
+    job = object.__new__(GaussianMECPJob)
+    job.settings = SimpleNamespace(
+        energy_diff_tol=0.1,
+        force_max_tol=0.2,
+        force_rms_tol=0.2,
+        disp_max_tol=0.3,
+        disp_rms_tol=0.3,
+    )
+    gradient = np.array([[0.1, -0.1, 0.0]])
+    displacement = np.array([[0.2, 0.0, 0.0]])
+
+    assert job._is_converged(0.05, gradient, displacement)
+    assert not job._is_converged(0.11, gradient, displacement)
+    assert not job._is_converged(0.05, gradient * 3, displacement)
+    assert not job._is_converged(0.05, gradient, displacement * 2)
+
+
+def test_numerical_hessian_uses_central_differences_and_symmetrizes():
+    job = object.__new__(GaussianMECPJob)
+    job.molecule = SimpleNamespace(symbols=["H"])
+    calls = []
+    hessian_a = np.diag([1.0, 2.0, 3.0])
+    hessian_b = np.diag([4.0, 5.0, 6.0])
+
+    def run_state(positions, step, state, checkpoint_tag=None):
+        calls.append((step, state, checkpoint_tag))
+        matrix = hessian_a if state == "A" else hessian_b
+        gradient = (matrix @ np.asarray(positions).ravel()).reshape(1, 3)
+        return 0.0, gradient
+
+    job._run_state = run_state
+    actual_a, actual_b = job._compute_numerical_hessian(
+        np.zeros((1, 3)), h=1.0e-3, step_prefix=10
+    )
+
+    np.testing.assert_allclose(actual_a, hessian_a)
+    np.testing.assert_allclose(actual_b, hessian_b)
+    assert len(calls) == 12
+    assert calls[0] == (10, "A", "check")
+    assert calls[-1] == (15, "B", "check")
+
+
+def test_lagrangian_hessian_rejects_identical_gradients():
+    gradient = np.ones((1, 3))
+    with pytest.raises(RuntimeError, match="Difference gradient is too small"):
+        GaussianMECPJob._lagrangian_hessian(
+            np.eye(3), np.eye(3), gradient, gradient
+        )
+
+
+def test_seam_check_runner_accepts_minimum_and_rejects_saddle():
+    job = object.__new__(GaussianMECPJob)
+    job.label = "crossing"
+    job.settings = SimpleNamespace(mecp_numfreq=True)
+    job.verify_seam_minimum = lambda **kwargs: {
+        "is_minimum": True,
+        "n_negative": 0,
+    }
+    job._run_seam_minimum_check(np.zeros((1, 3)))
+
+    job.verify_seam_minimum = lambda **kwargs: {
+        "is_minimum": False,
+        "n_negative": 2,
+    }
+    with pytest.raises(RuntimeError, match="2 negative eigenvalue"):
+        job._run_seam_minimum_check(np.zeros((1, 3)))
+
+
+def test_step_and_seam_logs_include_diagnostics(tmp_path):
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    report = StringIO()
+    job.log_step(
+        report,
+        3,
+        -10.0,
+        -10.1,
+        np.array([[0.1, -0.2, 0.0]]),
+        np.array([[0.01, 0.02, 0.0]]),
+        np.array([[0.03, 0.0, 0.0]]),
+        0.15,
+    )
+    assert "step=3" in report.getvalue()
+    assert "dE=+1.000000e-01" in report.getvalue()
+    assert "step_size=1.500e-01" in report.getvalue()
+
+    job._write_seam_check_log(
+        {
+            "energy_diff": 1.0e-5,
+            "n_projected": 7,
+            "lagrange_multiplier": 0.4,
+            "n_negative": 1,
+            "is_minimum": False,
+            "eigenvalues": np.array([-0.2, 0.5]),
+        },
+        1.0e-3,
+        20,
+    )
+    contents = (tmp_path / "crossing_seam_check.log").read_text()
+    assert "SADDLE POINT ON SEAM" in contents
+    assert "** NEGATIVE **" in contents
+
+
+def _driver_job(tmp_path, max_steps=2):
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "driver"
+    job.molecule = SimpleNamespace(symbols=["H"], positions=np.zeros((1, 3)))
+    job.settings = SimpleNamespace(
+        step_size=0.1,
+        max_steps=max_steps,
+        trust_radius=0.3,
+        adaptive_step_size=False,
+        step_size_method="bb",
+        restart=False,
+        verify_seam_minimum=False,
+        mecp_numfreq=False,
+        energy_diff_tol=1.0e-4,
+        force_max_tol=1.0e-3,
+        force_rms_tol=1.0e-3,
+        disp_max_tol=1.0e-3,
+        disp_rms_tol=1.0e-3,
+    )
+    return job
+
+
+def test_mecp_driver_writes_final_marker_on_convergence(tmp_path):
+    job = _driver_job(tmp_path)
+    states = []
+
+    def run_state(positions, step, state):
+        states.append((step, state))
+        return 0.0, np.zeros((1, 3))
+
+    job._run_state = run_state
+    job._run()
+
+    assert states == [(1, "A"), (1, "B")]
+    assert job.molecule.positions == pytest.approx(np.zeros((1, 3)))
+    report = Path(job.report_file).read_text()
+    assert "Optimization converged at step 1." in report
+    assert report.endswith("Converged at step 1.\n")
+    assert Path(job.trajectory_file).is_file()
+
+
+def test_mecp_driver_raises_when_max_steps_are_exhausted(tmp_path):
+    job = _driver_job(tmp_path, max_steps=1)
+    job._run_state = lambda positions, step, state: (
+        1.0 if state == "A" else 0.0,
+        np.array([[1.0, 0.0, 0.0]])
+        if state == "A"
+        else np.array([[-1.0, 0.0, 0.0]]),
+    )
+
+    with pytest.raises(
+        RuntimeError, match="did not converge within max_steps"
+    ):
+        job._run()
+
+    assert Path(job.state_file).is_file()
