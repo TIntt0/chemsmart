@@ -136,19 +136,24 @@ def invoke_folder_command():
 def run_thermochemistry_and_capture_settings():
     """Run the thermochemistry CLI with mocked job construction."""
 
-    def _run(extra_args=None, ctx_obj=None):
+    def _run(
+        extra_args=None,
+        ctx_obj=None,
+        filename="dummy.log",
+        program_type="gaussian",
+    ):
         runner = CliRunner()
         captured_settings = None
         mock_job = MagicMock()
 
-        base_args = ["-f", "dummy.log", "-T", "298.15"]
+        base_args = ["-f", filename, "-T", "298.15"]
         cli_args = base_args + (extra_args or [])
 
         with (
             patch.object(
                 thermochemistry_cli_module,
                 "get_program_type_from_file",
-                return_value="gaussian",
+                return_value=program_type,
             ),
             patch.object(
                 thermochemistry_cli_module.ThermochemistryJob,

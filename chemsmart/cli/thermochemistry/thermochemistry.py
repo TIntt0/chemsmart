@@ -20,12 +20,29 @@ from chemsmart.utils.io import (
 
 logger = logging.getLogger(__name__)
 
+_MECP_FREQUENCY_HEADER = "CHEMSMART MECP projected frequency analysis"
+
+
+def _is_mecp_projected_frequency_file(filename):
+    """Return whether *filename* is a CHEMSMART MECP frequency output."""
+    try:
+        with open(filename, encoding="utf-8", errors="replace") as stream:
+            return stream.readline().strip() == _MECP_FREQUENCY_HEADER
+    except OSError:
+        return False
+
 
 def click_thermochemistry_options(f):
     """
     Common click options for Thermochemistry.
     """
 
+    @click.option(
+        "--electronic-degeneracy",
+        default=None,
+        type=click.IntRange(min=1),
+        help="Electronic statistical weight. For MECP inputs the default is 1.",
+    )
     @click.option(
         "-csg",
         "--cutoff-entropy-grimme",
@@ -161,6 +178,7 @@ def thermochemistry(
     outputfile,
     overwrite,
     check_imaginary_frequencies,
+    electronic_degeneracy,
     skip_completed,
     **kwargs,
 ):
@@ -225,6 +243,7 @@ def thermochemistry(
         outputfile=outputfile,
         overwrite=overwrite,
         check_imaginary_frequencies=check_imaginary_frequencies,
+        electronic_degeneracy=electronic_degeneracy,
     )
 
     # Initialize list to store jobs
@@ -271,10 +290,16 @@ def thermochemistry(
 
     elif filenames:
         for file in filenames:
-            if get_program_type_from_file(file) not in {"gaussian", "orca"}:
+            supported_program = get_program_type_from_file(file) in {
+                "gaussian",
+                "orca",
+            }
+            if not supported_program and not _is_mecp_projected_frequency_file(
+                file
+            ):
                 raise ValueError(
-                    f"Unsupported output file type for '{file}'. Use Gaussian or "
-                    f"ORCA output files."
+                    f"Unsupported output file type for '{file}'. Use Gaussian, "
+                    "ORCA, or CHEMSMART MECP projected-frequency output files."
                 )
             job = ThermochemistryJob.from_filename(
                 filename=file,

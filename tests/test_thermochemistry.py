@@ -3598,6 +3598,25 @@ class TestThermochemistryCLI:
         assert settings is not None
         assert settings.check_imaginary_frequencies is False
 
+    def test_mecp_projected_frequency_file_is_accepted(
+        self,
+        tmp_path,
+        run_thermochemistry_and_capture_settings,
+    ):
+        frequency_file = tmp_path / "crossing_mecp_freq.log"
+        frequency_file.write_text(
+            "CHEMSMART MECP projected frequency analysis\n",
+            encoding="utf-8",
+        )
+
+        result, settings = run_thermochemistry_and_capture_settings(
+            filename=str(frequency_file),
+            program_type=None,
+        )
+
+        assert result.exit_code == 0, result.output
+        assert settings is not None
+
 
 class TestThermochemistryCLIFolderOptions:
     """Folder options are wired correctly into the ``thermochemistry`` CLI."""

@@ -17,6 +17,7 @@ from chemsmart.jobs.gaussian.settings import (
     GaussianMECPJobSettings,
 )
 from chemsmart.jobs.gaussian.writer import GaussianInputWriter
+from chemsmart.jobs.thermochemistry.job import ThermochemistryJob
 
 
 def test_first_mecp_step_removes_unavailable_guess_read():
@@ -232,12 +233,18 @@ def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
         temperature=298.15,
         electronic_degeneracy=4,
     )
+    thermochemistry_job = ThermochemistryJob.from_filename(
+        str(frequency_file),
+        jobrunner=object(),
+    )
 
     assert thermochemistry.jobtype == "mecp"
     assert thermochemistry.vibrational_frequencies == pytest.approx([1234.5])
     assert thermochemistry.file_object.energies == pytest.approx([-0.99999])
     assert thermochemistry.multiplicity == 4
     assert thermochemistry.rotational_symmetry_number == 1
+    assert thermochemistry_job.molecule.symbols == ["H", "H"]
+    assert thermochemistry_job.label == "crossing_mecp_freq"
 
     result["frequencies"] = np.array([-1.0])
     job._write_mecp_frequency_log(result, 1.0e-3)
