@@ -10,6 +10,7 @@ from chemsmart.cli.gaussian.gaussian import (
 )
 from chemsmart.cli.gaussian.mecp_options import (
     add_mecp_method_suffix,
+    click_mecp_frequency_options,
     click_mecp_restart_option,
     click_mecp_state_options,
     click_mecp_step_size_method_option,
@@ -130,6 +131,7 @@ logger = logging.getLogger(__name__)
     help="[MECP] Maximum allowed adaptive step size in Bohr^2/Hartree (default: 1.0).",
 )
 @click_mecp_restart_option
+@click_mecp_frequency_options
 @click.pass_context
 def link(
     ctx,
@@ -170,6 +172,9 @@ def link(
     step_size_min,
     step_size_max,
     restart,
+    verify_seam_minimum,
+    mecp_numfreq,
+    hess_step_size,
     **kwargs,
 ):
     """CLI subcommand for running Gaussian link jobs."""
@@ -202,6 +207,9 @@ def link(
             step_size_min=step_size_min,
             step_size_max=step_size_max,
             restart=restart,
+            verify_seam_minimum=verify_seam_minimum,
+            mecp_numfreq=mecp_numfreq,
+            hess_step_size=hess_step_size,
             **kwargs,
         )
 
@@ -329,6 +337,9 @@ def _link_mecp(
     step_size_min,
     step_size_max,
     restart,
+    verify_seam_minimum,
+    mecp_numfreq,
+    hess_step_size,
     **kwargs,
 ):
     """
@@ -436,6 +447,10 @@ def _link_mecp(
     if step_size_max is not None:
         mecp_settings.step_size_max = step_size_max
     mecp_settings.restart = restart
+    mecp_settings.verify_seam_minimum = verify_seam_minimum
+    mecp_settings.mecp_numfreq = mecp_numfreq
+    if hess_step_size is not None:
+        mecp_settings.hess_step_size = hess_step_size
 
     # automatically use unrestricted DFT for broken-symmetry calculations
     if not mecp_settings.functional.lower().startswith("u"):

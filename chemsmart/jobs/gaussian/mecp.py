@@ -15,6 +15,11 @@ from ase import units
 
 from chemsmart.jobs.gaussian.job import GaussianGeneralJob, GaussianJob
 from chemsmart.jobs.gaussian.settings import GaussianMECPJobSettings
+from chemsmart.utils.constants import (
+    amu_to_kg,
+    bohr_to_meter,
+    hartree_to_joules,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +65,7 @@ _MECP_ONLY_KEYS = frozenset(
         "use_link",
         "convergence_preset",
         "verify_seam_minimum",
+        "mecp_numfreq",
         "hess_step_size",
         "restart",
     }
@@ -241,7 +247,19 @@ class GaussianMECPJob(GaussianJob):
         if not os.path.isfile(self.report_file):
             return False
         with open(self.report_file, encoding="utf-8") as f:
-            return any(line.startswith("Converged at step") for line in f)
+            converged = any(line.startswith("Converged at step") for line in f)
+        if not converged:
+            return False
+        if self.settings.verify_seam_minimum or self.settings.mecp_numfreq:
+            if not os.path.isfile(
+                os.path.join(self.folder, f"{self.label}_seam_check.log")
+            ):
+                return False
+        if self.settings.mecp_numfreq:
+            return os.path.isfile(
+                os.path.join(self.folder, f"{self.label}_mecp_freq.log")
+            )
+        return True
 
     def _state_settings(self, charge, multiplicity, title, state="A"):
         """
@@ -949,7 +967,7 @@ class GaussianMECPJob(GaussianJob):
 
         self.molecule.positions = positions_bohr * units.Bohr
 
-        if self.settings.verify_seam_minimum:
+        if self.settings.verify_seam_minimum or self.settings.mecp_numfreq:
             self._run_seam_minimum_check(positions_bohr)
 
         with open(self.report_file, "a", encoding="utf-8") as report:
@@ -1039,6 +1057,90 @@ class GaussianMECPJob(GaussianJob):
         seam_basis = q_full[:, projected_basis.shape[1] :]
         return seam_basis.T @ hessian @ seam_basis
 
+    @staticmethod
+    def _frequency_from_mass_weighted_eigenvalue(eigenvalue):
+        """Convert Hartree/(Bohr² amu) to a signed wavenumber in cm⁻¹."""
+        angular_frequency = np.sqrt(
+            abs(eigenvalue)
+            * hartree_to_joules
+            / (bohr_to_meter**2 * amu_to_kg)
+        )
+        wavenumber = angular_frequency / (2.0 * np.pi * units._c * 100.0)
+        return float(np.copysign(wavenumber, eigenvalue))
+
+    def _projected_frequencies_and_modes(
+        self, hessian, positions_bohr, diff_grad
+    ):
+        """Return mass-weighted MECP frequencies and Cartesian normal modes.
+
+        Translation, rotation, and the gradient-difference direction are
+        removed in mass-weighted coordinates. Frequencies are returned as
+        signed wavenumbers in cm⁻¹; a negative value denotes an imaginary
+        mode on the crossing seam.
+        """
+        positions = np.asarray(positions_bohr, dtype=float)
+        masses = np.asarray(self.molecule.most_abundant_masses, dtype=float)
+        sqrt_masses = np.sqrt(masses)
+        mass_vector = np.repeat(masses, 3)
+        sqrt_mass_vector = np.sqrt(mass_vector)
+
+        mass_weighted_hessian = hessian / np.sqrt(
+            np.outer(mass_vector, mass_vector)
+        )
+
+        center_of_mass = np.average(positions, axis=0, weights=masses)
+        centered = positions - center_of_mass
+        raw_projection_vectors = []
+
+        for axis_index in range(3):
+            translation = np.zeros_like(positions)
+            translation[:, axis_index] = sqrt_masses
+            raw_projection_vectors.append(translation.ravel())
+
+        for axis in np.eye(3):
+            rotation = np.cross(centered, axis) * sqrt_masses[:, None]
+            raw_projection_vectors.append(rotation.ravel())
+
+        mass_weighted_diff_grad = (
+            np.asarray(diff_grad, dtype=float).ravel() / sqrt_mass_vector
+        )
+        raw_projection_vectors.append(mass_weighted_diff_grad)
+
+        projection_vectors = []
+        for vector in raw_projection_vectors:
+            vector = np.asarray(vector, dtype=float)
+            for basis_vector in projection_vectors:
+                vector -= np.dot(vector, basis_vector) * basis_vector
+            norm = np.linalg.norm(vector)
+            if norm > 1.0e-10:
+                projection_vectors.append(vector / norm)
+
+        if projection_vectors:
+            projected_basis = np.column_stack(projection_vectors)
+            full_basis, _ = np.linalg.qr(projected_basis, mode="complete")
+            seam_basis = full_basis[:, projected_basis.shape[1] :]
+        else:
+            seam_basis = np.eye(hessian.shape[0])
+
+        reduced_hessian = (
+            seam_basis.T @ mass_weighted_hessian @ seam_basis
+        )
+        eigenvalues, reduced_modes = np.linalg.eigh(reduced_hessian)
+        mass_weighted_modes = seam_basis @ reduced_modes
+        cartesian_modes = mass_weighted_modes / sqrt_mass_vector[:, None]
+        mode_norms = np.linalg.norm(cartesian_modes, axis=0)
+        cartesian_modes /= mode_norms
+
+        frequencies = np.array(
+            [
+                self._frequency_from_mass_weighted_eigenvalue(value)
+                for value in eigenvalues
+            ]
+        )
+        return frequencies, cartesian_modes.T, eigenvalues, len(
+            projection_vectors
+        )
+
     @classmethod
     def _lagrangian_hessian(cls, hessian_a, hessian_b, grad_a, grad_b):
         """Return the constrained MECP Lagrangian Hessian and multiplier."""
@@ -1123,7 +1225,9 @@ class GaussianMECPJob(GaussianJob):
         H_B = (H_B + H_B.T) / 2
         return H_A, H_B
 
-    def verify_seam_minimum(self, h=None, step_prefix=1):
+    def verify_seam_minimum(
+        self, h=None, step_prefix=1, write_frequencies=False
+    ):
         """
         Verify that the current MECP geometry is a **minimum on the crossing
         seam**, not merely a crossing point.
@@ -1147,8 +1251,7 @@ class GaussianMECPJob(GaussianJob):
             This analysis requires **4 × 3N** additional Gaussian sub-jobs
             (see :meth:`_compute_numerical_hessian`).  Call it only on the
             converged geometry.  Trigger automatically via the
-            ``--verify-seam-minimum`` CLI flag or by setting
-            ``settings.verify_seam_minimum = True``.
+            ``--verify-seam-minimum`` or ``--mecp-numfreq`` CLI flag.
 
         Args:
             h (float, optional): Finite-difference step size in Bohr.
@@ -1156,6 +1259,8 @@ class GaussianMECPJob(GaussianJob):
             step_prefix (int, optional): Starting check-specific sub-job step
                 index (default: 1). The ``check`` name component prevents
                 clashes with normal MECP steps.
+            write_frequencies (bool, optional): Write mass-weighted projected
+                frequencies and normal modes in addition to the seam check.
 
         Returns:
             dict: Keys ``"eigenvalues"`` (1-D array, non-projected modes),
@@ -1190,26 +1295,55 @@ class GaussianMECPJob(GaussianJob):
             positions_bohr, h=h, step_prefix=step_prefix + 1
         )
 
-        proj_vecs = self._build_projection_vectors(positions_bohr, diff_grad)
         H_lagrangian, lagrange_multiplier = self._lagrangian_hessian(
             H_A, H_B, grad_a, grad_b
         )
+        proj_vecs = self._build_projection_vectors(positions_bohr, diff_grad)
         H_seam = self._reduced_hessian(H_lagrangian, proj_vecs)
 
         non_zero_evals = np.sort(np.linalg.eigvalsh(H_seam))
         n_proj = len(proj_vecs)
-        n_negative = int(np.sum(non_zero_evals < -1.0e-6))
+        # Use the same mass-weighted curvature tolerance for both CLI modes.
+        # Raw Cartesian and mass-weighted eigenvalues have different units.
+        frequencies, modes, frequency_eigenvalues, frequency_n_proj = (
+            self._projected_frequencies_and_modes(
+                H_lagrangian, positions_bohr, diff_grad
+            )
+        )
+        n_negative = int(np.sum(frequency_eigenvalues < -1.0e-6))
 
         result = {
             "eigenvalues": non_zero_evals,
             "n_negative": n_negative,
             "is_minimum": n_negative == 0,
+            "energy_a": ea,
+            "energy_b": eb,
+            "mecp_energy": 0.5 * (ea + eb),
             "energy_diff": ea - eb,
             "n_projected": n_proj,
             "lagrange_multiplier": lagrange_multiplier,
+            "positions_angstrom": positions_bohr * units.Bohr,
+            "atomic_masses": np.asarray(
+                self.molecule.most_abundant_masses, dtype=float
+            ),
+            "multiplicity_a": self.settings.multiplicity_a,
+            "multiplicity_b": self.settings.multiplicity_b,
+            # Molecular point-group detection is not currently available on
+            # Molecule. Use the conservative C1 symmetry number by default.
+            "rotational_symmetry_number": 1,
         }
 
+        if write_frequencies:
+            result.update(
+                frequency_eigenvalues=frequency_eigenvalues,
+                frequencies=frequencies,
+                modes=modes,
+                n_projected=frequency_n_proj,
+            )
+
         self._write_seam_check_log(result, h, step_prefix)
+        if write_frequencies:
+            self._write_mecp_frequency_log(result, h)
         self._remove_checkpoint_set("check")
         return result
 
@@ -1224,9 +1358,11 @@ class GaussianMECPJob(GaussianJob):
                 os.remove(checkpoint_file)
 
     def _run_seam_minimum_check(self, positions_bohr):
-        """Called at the end of ``_run()`` when ``verify_seam_minimum`` is set."""
+        """Run the requested post-convergence MECP Hessian analysis."""
         logger.info(f"Starting seam-minimum verification for {self.label}")
-        result = self.verify_seam_minimum()
+        result = self.verify_seam_minimum(
+            write_frequencies=self.settings.mecp_numfreq
+        )
         status = (
             "MINIMUM"
             if result["is_minimum"]
@@ -1261,11 +1397,88 @@ class GaussianMECPJob(GaussianJob):
             n_neg = result["n_negative"]
             is_min = result["is_minimum"]
             f.write(
-                f"n_negative_eigenvalues={n_neg}  "
+                f"n_significant_negative_mass_weighted_eigenvalues={n_neg}  "
                 f"{'MECP MINIMUM' if is_min else 'SADDLE POINT ON SEAM'}\n"
             )
+            f.write("Minimum test tolerance: -1e-6 Hartree/(Bohr^2 amu).\n")
             f.write("\nEigenvalues of H_eff (Hartree/Bohr^2):\n")
             for i, ev in enumerate(result["eigenvalues"]):
-                flag = "  ** NEGATIVE **" if ev < -1.0e-6 else ""
+                flag = "  ** NEGATIVE **" if ev < 0.0 else ""
                 f.write(f"  mode {i + 1:4d}: {ev:+.6e}{flag}\n")
         logger.info(f"Seam-minimum check results written to {seam_check_file}")
+
+    def _write_mecp_frequency_log(self, result, h):
+        """Write projected MECP frequencies and Cartesian normal modes."""
+        frequency_file = os.path.join(
+            self.folder, f"{self.label}_mecp_freq.log"
+        )
+        symbols = list(self.molecule.symbols)
+        positions = np.asarray(result["positions_angstrom"], dtype=float)
+        masses = np.asarray(result["atomic_masses"], dtype=float)
+
+        with open(frequency_file, "w", encoding="utf-8") as output:
+            output.write("CHEMSMART MECP projected frequency analysis\n")
+            output.write(f"label={self.label}\n")
+            output.write(f"hess_step={h:.6e} Bohr\n")
+            output.write(f"energy_A={result['energy_a']:+.12f} Hartree\n")
+            output.write(f"energy_B={result['energy_b']:+.12f} Hartree\n")
+            output.write(
+                f"mecp_energy={result['mecp_energy']:+.12f} Hartree\n"
+            )
+            output.write(
+                f"energy_difference={result['energy_diff']:+.6e} Hartree\n"
+            )
+            output.write(
+                f"lagrange_multiplier="
+                f"{result['lagrange_multiplier']:+.8e}\n"
+            )
+            output.write(f"n_atoms={len(symbols)}\n")
+            output.write(f"n_projected={result['n_projected']}\n")
+            output.write(f"n_modes={len(result['frequencies'])}\n")
+            output.write(
+                f"n_imaginary={int(np.sum(result['frequencies'] < 0.0))}\n"
+                f"n_significant_imaginary={result['n_negative']}\n\n"
+            )
+            output.write(
+                f"multiplicity_A={result['multiplicity_a']}\n"
+                f"multiplicity_B={result['multiplicity_b']}\n"
+                "rotational_symmetry_number="
+                f"{result['rotational_symmetry_number']}\n\n"
+            )
+
+            output.write("Geometry (Angstrom) and masses (amu):\n")
+            for symbol, position, mass in zip(symbols, positions, masses):
+                output.write(
+                    f"{symbol:>3s} {position[0]:+16.8f} "
+                    f"{position[1]:+16.8f} {position[2]:+16.8f} "
+                    f"{mass:12.8f}\n"
+                )
+
+            output.write("\nProjected MECP frequencies (cm^-1):\n")
+            for index, frequency in enumerate(result["frequencies"], 1):
+                output.write(f"mode {index:4d}: {frequency:+14.6f}\n")
+
+            output.write(
+                "\nCartesian normal modes "
+                "(mass-unweighted, unit-normalized):\n"
+            )
+            for mode_index, mode in enumerate(result["modes"], 1):
+                frequency = result["frequencies"][mode_index - 1]
+                output.write(
+                    f"mode {mode_index:4d} "
+                    f"frequency={frequency:+.6f} cm^-1\n"
+                )
+                mode_vectors = np.asarray(mode).reshape(len(symbols), 3)
+                for atom_index, (symbol, vector) in enumerate(
+                    zip(symbols, mode_vectors), 1
+                ):
+                    output.write(
+                        f"{atom_index:5d} {symbol:>3s} "
+                        f"{vector[0]:+14.8f} {vector[1]:+14.8f} "
+                        f"{vector[2]:+14.8f}\n"
+                    )
+                output.write("\n")
+
+        logger.info(
+            f"MECP projected frequencies written to {frequency_file}"
+        )

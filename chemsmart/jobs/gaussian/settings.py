@@ -1194,6 +1194,7 @@ class GaussianMECPJobSettings(GaussianJobSettings):
         guess="mix",  # initial guess for link mode (e.g. "mix" to break α/β symmetry)
         # seam-minimum verification via effective Hessian analysis
         verify_seam_minimum=False,
+        mecp_numfreq=False,
         hess_step_size=1.0e-3,  # Bohr; finite-difference displacement for numerical Hessian
         restart=True,
         **kwargs,
@@ -1267,6 +1268,7 @@ class GaussianMECPJobSettings(GaussianJobSettings):
         self.stable = stable
         self.guess = guess
         self.verify_seam_minimum = verify_seam_minimum
+        self.mecp_numfreq = mecp_numfreq
         self.hess_step_size = hess_step_size
         self.restart = restart
 

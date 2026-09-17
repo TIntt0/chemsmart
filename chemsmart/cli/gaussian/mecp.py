@@ -5,6 +5,7 @@ import click
 from chemsmart.cli.gaussian.gaussian import gaussian
 from chemsmart.cli.gaussian.mecp_options import (
     add_mecp_method_suffix,
+    click_mecp_frequency_options,
     click_mecp_restart_option,
     click_mecp_state_options,
     click_mecp_step_size_method_option,
@@ -125,25 +126,7 @@ logger = logging.getLogger(__name__)
     default=None,
     help="Maximum allowed adaptive step size in Bohr^2/Hartree (default: 1.0).",
 )
-@click.option(
-    "--verify-seam-minimum/--no-verify-seam-minimum",
-    default=False,
-    show_default=True,
-    help=(
-        "After convergence, verify the MECP is a true minimum on the crossing "
-        "seam via an effective Hessian analysis (projects out translations, "
-        "rotations, and the gradient-difference direction). Requires ~4×3N "
-        "additional Gaussian sub-jobs. Results are written to "
-        "<label>_seam_check.log."
-    ),
-)
-@click.option(
-    "--hess-step-size",
-    type=float,
-    default=None,
-    help="Finite-difference step size (Bohr) for the numerical Hessian used in "
-    "--verify-seam-minimum (default: 1e-3).",
-)
+@click_mecp_frequency_options
 @click_mecp_restart_option
 @click.pass_context
 def mecp(
@@ -170,6 +153,7 @@ def mecp(
     step_size_min,
     step_size_max,
     verify_seam_minimum,
+    mecp_numfreq,
     hess_step_size,
     restart,
     skip_completed,
@@ -282,6 +266,7 @@ def mecp(
     if step_size_max is not None:
         mecp_settings.step_size_max = step_size_max
     mecp_settings.verify_seam_minimum = verify_seam_minimum
+    mecp_settings.mecp_numfreq = mecp_numfreq
     mecp_settings.restart = restart
     if hess_step_size is not None:
         mecp_settings.hess_step_size = hess_step_size

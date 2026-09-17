@@ -189,10 +189,16 @@ MECP Options
          Requires ~4×3N additional Gaussian sub-jobs. Results are written to ``<label>_seam_check.log``. See the
          :ref:`seam-minimum-verification` section below.
 
+   -  -  ``--mecp-numfreq / --no-mecp-numfreq``
+      -  bool
+      -  False
+      -  Perform the seam-minimum verification and additionally write mass-weighted projected MECP frequencies and
+         normal modes to ``<label>_mecp_freq.log``.
+
    -  -  ``--hess-step-size``
       -  float
       -  1.0×10⁻³ Bohr
-      -  Finite-difference step size used by ``--verify-seam-minimum`` for the numerical Hessian.
+      -  Finite-difference step size used by ``--verify-seam-minimum`` or ``--mecp-numfreq`` for the numerical Hessian.
 
 .. _convergence-presets:
 
@@ -372,8 +378,8 @@ Temporary checkpoints are retained if verification fails.
 Output Files
 ============
 
-Three output files are produced in the main job directory; Gaussian sub-job input/output files are stored in
-``<label>_steps``. The third (``<label>_seam_check.log``) is written only when ``--verify-seam-minimum`` is requested:
+The main output files are produced in the job directory; Gaussian sub-job input/output files are stored in
+``<label>_steps``. Hessian-analysis files are written only when their corresponding option is requested:
 
 ``<label>_report.log``
    Step-by-step optimization log. The file header records the run settings; each subsequent line reports one step, using
@@ -404,9 +410,14 @@ Three output files are produced in the main job directory; Gaussian sub-job inpu
    Multi-frame XYZ trajectory of the MECP geometry at every optimization step (coordinates in Ångström).
 
 ``<label>_seam_check.log``
-   Written only when ``--verify-seam-minimum`` is requested. Reports the eigenvalues of the effective projected Hessian
+   Written when ``--verify-seam-minimum`` or ``--mecp-numfreq`` is requested. Reports the eigenvalues of the effective projected Hessian
    :math:`H_\text{eff}` (translations, rotations, and gradient-difference direction removed) and whether the MECP is a
    true minimum on the seam. See the :ref:`seam-minimum-verification` section below.
+
+``<label>_mecp_freq.log``
+   Written only by ``--mecp-numfreq``. Contains the converged geometry, both state energies, MECP energy, atomic
+   masses, mass-weighted projected frequencies, and Cartesian normal modes. It can be passed directly to CHEMSMART
+   thermochemistry.
 
 .. _seam-minimum-verification:
 
@@ -432,15 +443,16 @@ CHEMSMART constructs a projector that removes these constrained directions:
    P = I - \sum_i |\mathbf{v}_i\rangle\langle\mathbf{v}_i|
 
 where :math:`\{\mathbf{v}_i\}` is an orthonormal set spanning translations, rotations, and
-:math:`\hat{\mathbf{g}}_\Delta`. The **effective Hessian** is
+:math:`\hat{\mathbf{g}}_\Delta`. The **effective Lagrangian Hessian** is
 
 .. math::
 
-   H_\text{eff} = P\,\bar{H}\,P, \qquad \bar{H} = \tfrac{1}{2}(H_A + H_B)
+   H_\text{eff} = P\,[(1-\lambda)H_A + \lambda H_B]P
 
-where :math:`H_A` and :math:`H_B` are the numerical Hessians of the two states, averaged to give a balanced description.
-If all non-zero eigenvalues of :math:`H_\text{eff}` are positive, the point is confirmed as a seam minimum; any negative
-eigenvalue indicates a lower-energy MECP elsewhere on the seam.
+where :math:`H_A` and :math:`H_B` are the numerical Hessians of the two states and :math:`\lambda` is the constrained
+MECP Lagrange multiplier. For frequencies, the Hessian and projection vectors are transformed to mass-weighted
+coordinates before diagonalisation. If all projected eigenvalues are positive, the point is confirmed as a seam
+minimum; any negative eigenvalue indicates a lower-energy MECP elsewhere on the seam.
 
 .. note::
 
@@ -451,12 +463,13 @@ eigenvalue indicates a lower-energy MECP elsewhere on the seam.
 Usage
 -----
 
-Add ``--verify-seam-minimum`` to the MECP command after the optimization converges:
+Use ``--verify-seam-minimum`` for the seam check alone, or ``--mecp-numfreq`` to perform the same check and also write
+projected frequencies and modes:
 
 .. code:: bash
 
    chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 mecp \
-       --convergence tight --verify-seam-minimum
+       --convergence tight --mecp-numfreq
 
 The verification requires **4 × 3N** additional Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
 coordinates), labelled ``<label>_check_step1_A``, ``<label>_check_step2_A``, etc. For a 10-atom molecule this is 120
@@ -476,6 +489,16 @@ Results are written to ``<label>_seam_check.log``:
      mode    1: +1.234567e-03
      mode    2: +2.345678e-03
      ...
+
+The corresponding ``3N-7`` projected frequencies and normal modes are written to ``<label>_mecp_freq.log``. For a
+linear molecule the number of modes is ``3N-6``. Thermochemistry can then be calculated with, for example:
+
+.. code:: bash
+
+   chemsmart run thermochemistry -f <label>_mecp_freq.log -T 298.15
+
+The MECP frequency file uses a conservative electronic degeneracy of 1 by default. If a different statistical weight
+is required by the chosen non-adiabatic rate theory, specify it with ``--electronic-degeneracy``.
 
 Basic Usage
 ===========

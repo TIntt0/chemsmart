@@ -74,3 +74,40 @@ def click_mecp_restart_option(function):
         show_default=True,
         help="Resume an interrupted MECP optimization from its saved state.",
     )(function)
+
+
+def click_mecp_frequency_options(function):
+    """Apply the common post-MECP Hessian-analysis options."""
+    options = (
+        click.option(
+            "--verify-seam-minimum/--no-verify-seam-minimum",
+            default=False,
+            show_default=True,
+            help=(
+                "After convergence, verify the MECP is a minimum on the "
+                "crossing seam and write <label>_seam_check.log."
+            ),
+        ),
+        click.option(
+            "--mecp-numfreq/--no-mecp-numfreq",
+            default=False,
+            show_default=True,
+            help=(
+                "After convergence, verify the seam minimum and write "
+                "mass-weighted projected MECP frequencies and normal modes "
+                "to <label>_mecp_freq.log."
+            ),
+        ),
+        click.option(
+            "--hess-step-size",
+            type=float,
+            default=None,
+            help=(
+                "Finite-difference step size (Bohr) for MECP Hessian "
+                "analysis (default: 1e-3)."
+            ),
+        ),
+    )
+    for option in reversed(options):
+        function = option(function)
+    return function

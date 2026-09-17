@@ -6,6 +6,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from chemsmart.analysis.thermochemistry import Thermochemistry
 from chemsmart.cli.gaussian.mecp_options import add_mecp_method_suffix
 from chemsmart.io.gaussian.output import Gaussian16Output
 from chemsmart.jobs.gaussian.mecp import GaussianMECPJob
@@ -164,6 +165,84 @@ def test_reduced_hessian_preserves_negative_seam_curvature():
     np.testing.assert_allclose(eigenvalues, [-2.0, 3.0], atol=1.0e-12)
 
 
+def test_projected_mecp_frequencies_have_3n_minus_7_modes():
+    job = object.__new__(GaussianMECPJob)
+    job.molecule = SimpleNamespace(
+        symbols=["H", "H", "H"],
+        most_abundant_masses=np.ones(3),
+    )
+    positions = np.array(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+    )
+    diff_grad = np.array(
+        [[1.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]]
+    )
+
+    frequencies, modes, eigenvalues, n_projected = (
+        job._projected_frequencies_and_modes(
+            np.eye(9), positions, diff_grad
+        )
+    )
+
+    assert n_projected == 7
+    assert frequencies.shape == (2,)
+    assert modes.shape == (2, 9)
+    assert eigenvalues.shape == (2,)
+    assert np.all(frequencies > 0.0)
+    np.testing.assert_allclose(np.linalg.norm(modes, axis=1), 1.0)
+
+
+def test_mass_weighted_frequency_preserves_imaginary_mode_sign():
+    positive = GaussianMECPJob._frequency_from_mass_weighted_eigenvalue(1.0)
+    negative = GaussianMECPJob._frequency_from_mass_weighted_eigenvalue(-1.0)
+
+    assert positive > 0.0
+    assert negative == pytest.approx(-positive)
+
+
+def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    job.molecule = SimpleNamespace(symbols=["H", "H"])
+    result = {
+        "positions_angstrom": np.array([[0.0, 0.0, 0.0], [0.7, 0.0, 0.0]]),
+        "atomic_masses": np.array([1.007825, 1.007825]),
+        "energy_a": -1.0,
+        "energy_b": -0.99998,
+        "mecp_energy": -0.99999,
+        "energy_diff": -2.0e-5,
+        "lagrange_multiplier": 0.5,
+        "n_projected": 6,
+        "n_negative": 0,
+        "frequencies": np.array([1234.5]),
+        "modes": np.array([[0.5, 0.0, 0.0, -0.5, 0.0, 0.0]]),
+        "multiplicity_a": 1,
+        "multiplicity_b": 3,
+        "rotational_symmetry_number": 1,
+    }
+
+    job._write_mecp_frequency_log(result, 1.0e-3)
+    frequency_file = tmp_path / "crossing_mecp_freq.log"
+    thermochemistry = Thermochemistry(
+        str(frequency_file),
+        temperature=298.15,
+        electronic_degeneracy=4,
+    )
+
+    assert thermochemistry.jobtype == "mecp"
+    assert thermochemistry.vibrational_frequencies == pytest.approx([1234.5])
+    assert thermochemistry.file_object.energies == pytest.approx([-0.99999])
+    assert thermochemistry.multiplicity == 4
+    assert thermochemistry.rotational_symmetry_number == 1
+
+    result["frequencies"] = np.array([-1.0])
+    job._write_mecp_frequency_log(result, 1.0e-3)
+    contents = frequency_file.read_text(encoding="utf-8")
+    assert "n_imaginary=1\n" in contents
+    assert "n_significant_imaginary=0\n" in contents
+
+
 def test_lagrangian_hessian_weight_is_not_forced_to_average():
     grad_a = np.array([2.0, 0.0])
     grad_b = np.array([-1.0, 0.0])
@@ -235,6 +314,7 @@ def test_optimizer_state_rejects_method_change(tmp_path):
 
 def test_job_is_complete_requires_post_verification_marker(tmp_path):
     job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings()
     job.folder = str(tmp_path)
     job.label = "verified"
     report = Path(job.report_file)
@@ -244,6 +324,44 @@ def test_job_is_complete_requires_post_verification_marker(tmp_path):
 
     report.write_text("Converged at step 8.\n", encoding="utf-8")
     assert job._job_is_complete() is True
+
+
+def test_completed_mecp_requires_requested_frequency_outputs(tmp_path):
+    job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(mecp_numfreq=True)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    Path(job.report_file).write_text("Converged at step 3.\n")
+    assert not job._job_is_complete()
+    (tmp_path / "crossing_seam_check.log").write_text("checked\n")
+    assert not job._job_is_complete()
+    (tmp_path / "crossing_mecp_freq.log").write_text("frequencies\n")
+    assert job._job_is_complete()
+
+
+def test_seam_check_uses_same_tolerance_with_and_without_frequencies():
+    job = object.__new__(GaussianMECPJob)
+    job.label = "crossing"
+    job.settings = GaussianMECPJobSettings()
+    job.molecule = SimpleNamespace(
+        symbols=["H"] * 3,
+        positions=np.zeros((3, 3)),
+        most_abundant_masses=np.ones(3),
+    )
+    job._run_state = lambda *args, **kwargs: (0.0, np.ones((3, 3)))
+    job._compute_numerical_hessian = lambda *args, **kwargs: (None, None)
+    job._lagrangian_hessian = lambda *args: (np.eye(9), 0.5)
+    job._build_projection_vectors = lambda *args: []
+    job._projected_frequencies_and_modes = lambda *args: (
+        np.array([-10.0]), np.zeros((1, 9)), np.array([-4e-6]), 7
+    )
+    job._write_seam_check_log = lambda *args: None
+    job._write_mecp_frequency_log = lambda *args: None
+    job._remove_checkpoint_set = lambda *args: None
+    for write_frequencies in (False, True):
+        result = job.verify_seam_minimum(write_frequencies=write_frequencies)
+        assert result["n_negative"] == 1
+        assert not result["is_minimum"]
 
 
 @pytest.mark.parametrize("swap_states", [False, True])
