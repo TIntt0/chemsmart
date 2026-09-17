@@ -69,8 +69,6 @@ _MECP_ONLY_KEYS = frozenset(
         "hess_step_size",
         "follow_seam_imaginary_mode",
         "seam_mode_displacement",
-        "seam_mode_max_attempts",
-        "seam_mode_displacement_growth",
         "restart",
     }
 )
@@ -1414,95 +1412,75 @@ class GaussianMECPJob(GaussianJob):
         base_positions = np.asarray(result["positions_angstrom"], dtype=float)
         mode = modes[mode_index].reshape(base_positions.shape)
         candidates = []
-        selected_displacement = None
+        displacement_norm = self.settings.seam_mode_displacement
+        displacement = displacement_norm * mode
         follow_folder = os.path.join(
             self.folder, f"{self.label}_seam_follow"
         )
         os.makedirs(follow_folder, exist_ok=True)
 
-        for attempt in range(1, self.settings.seam_mode_max_attempts + 1):
-            displacement_norm = self.settings.seam_mode_displacement * (
-                self.settings.seam_mode_displacement_growth ** (attempt - 1)
+        for suffix, sign in (("plus", 1.0), ("minus", -1.0)):
+            positions = base_positions + sign * displacement
+            branch_label = f"{self.label}_seam_follow_{suffix}"
+            xyz_file = os.path.join(follow_folder, f"{branch_label}.xyz")
+            self._write_mode_displacement_xyz(
+                xyz_file,
+                positions,
+                (
+                    f"{self.label}: {sign:+.0f} displacement along mode "
+                    f"{mode_index + 1} "
+                    f"({frequencies[mode_index]:.6f} cm^-1), "
+                    f"norm={displacement_norm:.6f} Angstrom"
+                ),
             )
-            displacement = displacement_norm * mode
-            attempt_candidates = []
 
-            for suffix, sign in (("plus", 1.0), ("minus", -1.0)):
-                positions = base_positions + sign * displacement
-                branch_label = (
-                    f"{self.label}_seam_follow_a{attempt}_{suffix}"
+            molecule = self.molecule.copy()
+            molecule.positions = positions
+            settings = self.settings.copy()
+            settings.follow_seam_imaginary_mode = False
+            settings.verify_seam_minimum = True
+            settings.mecp_numfreq = True
+            settings.restart = False
+            # A loose optimization can declare convergence before the
+            # displaced structure has escaped the seam saddle. Preserve
+            # stricter custom values, otherwise require the tight preset.
+            tight = settings.CONVERGENCE_PRESETS["tight"]
+            for name in (
+                "energy_diff_tol",
+                "force_max_tol",
+                "force_rms_tol",
+                "disp_max_tol",
+                "disp_rms_tol",
+                "trust_radius",
+            ):
+                setattr(
+                    settings,
+                    name,
+                    min(getattr(settings, name), tight[name]),
                 )
-                xyz_file = os.path.join(follow_folder, f"{branch_label}.xyz")
-                self._write_mode_displacement_xyz(
-                    xyz_file,
-                    positions,
-                    (
-                        f"{self.label}: {sign:+.0f} displacement along mode "
-                        f"{mode_index + 1} "
-                        f"({frequencies[mode_index]:.6f} cm^-1), "
-                        f"norm={displacement_norm:.6f} Angstrom"
-                    ),
-                )
+            settings.convergence_preset = "tight"
 
-                molecule = self.molecule.copy()
-                molecule.positions = positions
-                settings = self.settings.copy()
-                settings.follow_seam_imaginary_mode = False
-                settings.verify_seam_minimum = True
-                settings.mecp_numfreq = True
-                settings.restart = False
-                # A loose optimization can declare convergence before the
-                # displaced structure has escaped the seam saddle. Preserve
-                # stricter custom values, otherwise require the tight preset.
-                tight = settings.CONVERGENCE_PRESETS["tight"]
-                for name in (
-                    "energy_diff_tol",
-                    "force_max_tol",
-                    "force_rms_tol",
-                    "disp_max_tol",
-                    "disp_rms_tol",
-                    "trust_radius",
-                ):
-                    setattr(
-                        settings,
-                        name,
-                        min(getattr(settings, name), tight[name]),
-                    )
-                settings.convergence_preset = "tight"
-
-                branch = self.__class__(
-                    molecule=molecule,
-                    settings=settings,
-                    label=branch_label,
-                    jobrunner=self.jobrunner,
-                    skip_completed=False,
-                )
-                branch.set_folder(follow_folder)
-                try:
-                    branch.run()
-                except RuntimeError as error:
-                    logger.warning(
-                        "Seam-mode attempt %d %s branch did not yield a "
-                        "minimum: %s",
-                        attempt,
-                        suffix,
-                        error,
-                    )
-                branch_result = getattr(branch, "_last_seam_result", None)
-                if branch_result is not None and branch_result["is_minimum"]:
-                    attempt_candidates.append(
-                        (branch_result["mecp_energy"], branch_result, suffix)
-                    )
-
-            if attempt_candidates:
-                candidates.extend(attempt_candidates)
-                selected_displacement = displacement_norm
-                break
-            logger.info(
-                "Both seam-mode branches returned saddles at %.6f Angstrom; "
-                "increasing the displacement.",
-                displacement_norm,
+            branch = self.__class__(
+                molecule=molecule,
+                settings=settings,
+                label=branch_label,
+                jobrunner=self.jobrunner,
+                skip_completed=False,
             )
+            branch.set_folder(follow_folder)
+            try:
+                branch.run()
+            except RuntimeError as error:
+                logger.warning(
+                    "Seam-mode %s branch did not yield a minimum: %s",
+                    suffix,
+                    error,
+                )
+            branch_result = getattr(branch, "_last_seam_result", None)
+            if branch_result is not None and branch_result["is_minimum"]:
+                candidates.append(
+                    (branch_result["mecp_energy"], branch_result, suffix)
+                )
 
         if not candidates:
             raise RuntimeError(
@@ -1528,7 +1506,7 @@ class GaussianMECPJob(GaussianJob):
                 f"source_frequency={frequencies[mode_index]:+.6f} cm^-1\n"
             )
             output.write(
-                f"displacement={selected_displacement:.6f} "
+                f"displacement={displacement_norm:.6f} "
                 "Angstrom\n"
             )
             output.write(f"selected_branch={selected_suffix}\n")

@@ -177,8 +177,6 @@ def link(
     hess_step_size,
     follow_seam_imaginary_mode,
     seam_mode_displacement,
-    seam_mode_max_attempts,
-    seam_mode_displacement_growth,
     **kwargs,
 ):
     """CLI subcommand for running Gaussian link jobs."""
@@ -216,8 +214,6 @@ def link(
             hess_step_size=hess_step_size,
             follow_seam_imaginary_mode=follow_seam_imaginary_mode,
             seam_mode_displacement=seam_mode_displacement,
-            seam_mode_max_attempts=seam_mode_max_attempts,
-            seam_mode_displacement_growth=seam_mode_displacement_growth,
             **kwargs,
         )
 
@@ -350,8 +346,6 @@ def _link_mecp(
     hess_step_size,
     follow_seam_imaginary_mode,
     seam_mode_displacement,
-    seam_mode_max_attempts,
-    seam_mode_displacement_growth,
     **kwargs,
 ):
     """
@@ -465,10 +459,6 @@ def _link_mecp(
     )
     mecp_settings.follow_seam_imaginary_mode = follow_seam_imaginary_mode
     mecp_settings.seam_mode_displacement = seam_mode_displacement
-    mecp_settings.seam_mode_max_attempts = seam_mode_max_attempts
-    mecp_settings.seam_mode_displacement_growth = (
-        seam_mode_displacement_growth
-    )
     if hess_step_size is not None:
         mecp_settings.hess_step_size = hess_step_size
 

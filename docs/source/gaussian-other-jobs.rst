@@ -209,17 +209,7 @@ MECP Options
    -  -  ``--seam-mode-displacement``
       -  float
       -  0.05 Å
-      -  Initial Cartesian norm of each positive/negative projected-mode displacement.
-
-   -  -  ``--seam-mode-max-attempts``
-      -  int
-      -  3
-      -  Maximum number of adaptive displacement attempts when both branches return to seam saddles.
-
-   -  -  ``--seam-mode-displacement-growth``
-      -  float
-      -  2.0
-      -  Factor by which the displacement is increased after an unsuccessful pair of branches.
+      -  Cartesian norm of each positive/negative projected-mode displacement.
 
 .. _convergence-presets:
 
@@ -504,14 +494,14 @@ projected imaginary frequency:
        --seam-mode-displacement 0.05
 
 All displaced structures, branch reports, trajectories, frequency logs, and Gaussian sub-jobs are collected under
-``<label>_seam_follow/``. Branch labels end in ``_seam_follow_a<N>_plus`` and
-``_seam_follow_a<N>_minus``. Only the final selected seam check and projected-frequency log, together with the concise
+``<label>_seam_follow/``. Branch labels end in ``_seam_follow_plus`` and
+``_seam_follow_minus``. Only the final selected seam check and projected-frequency log, together with the concise
 ``<label>_seam_follow.log`` selection record, remain in the main calculation directory. This is a projected seam-mode
 displacement followed by constrained MECP reoptimization; it does not invoke Gaussian IRC/QRC.
 
 Branch optimizations use at least the tight convergence thresholds. If both directions return to a seam saddle, the
-default displacement sequence is 0.05, 0.10, and 0.20 Å. Attempt labels contain ``_a1_``, ``_a2_``, or ``_a3_`` so
-that all intermediate structures and reports remain available for diagnosis.
+calculation stops and retains both branch results. The user can then rerun with a different
+``--seam-mode-displacement`` value.
 
 The verification requires **4 × 3N** additional Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
 coordinates), labelled ``<label>_check_step1_A``, ``<label>_check_step2_A``, etc. For a 10-atom molecule this is 120
