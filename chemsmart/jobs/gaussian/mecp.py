@@ -1415,6 +1415,10 @@ class GaussianMECPJob(GaussianJob):
         mode = modes[mode_index].reshape(base_positions.shape)
         candidates = []
         selected_displacement = None
+        follow_folder = os.path.join(
+            self.folder, f"{self.label}_seam_follow"
+        )
+        os.makedirs(follow_folder, exist_ok=True)
 
         for attempt in range(1, self.settings.seam_mode_max_attempts + 1):
             displacement_norm = self.settings.seam_mode_displacement * (
@@ -1428,7 +1432,7 @@ class GaussianMECPJob(GaussianJob):
                 branch_label = (
                     f"{self.label}_seam_follow_a{attempt}_{suffix}"
                 )
-                xyz_file = os.path.join(self.folder, f"{branch_label}.xyz")
+                xyz_file = os.path.join(follow_folder, f"{branch_label}.xyz")
                 self._write_mode_displacement_xyz(
                     xyz_file,
                     positions,
@@ -1473,7 +1477,7 @@ class GaussianMECPJob(GaussianJob):
                     jobrunner=self.jobrunner,
                     skip_completed=False,
                 )
-                branch.set_folder(self.folder)
+                branch.set_folder(follow_folder)
                 try:
                     branch.run()
                 except RuntimeError as error:

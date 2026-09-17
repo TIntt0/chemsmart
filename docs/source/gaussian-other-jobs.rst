@@ -503,9 +503,11 @@ projected imaginary frequency:
        --convergence tight --follow-seam-imaginary-mode \
        --seam-mode-displacement 0.05
 
-The branch labels end in ``_seam_follow_a<N>_plus`` and ``_seam_follow_a<N>_minus``. A concise selection record is written to
-``<label>_seam_follow.log``. This is a projected seam-mode displacement followed by constrained MECP reoptimization;
-it does not invoke Gaussian IRC/QRC.
+All displaced structures, branch reports, trajectories, frequency logs, and Gaussian sub-jobs are collected under
+``<label>_seam_follow/``. Branch labels end in ``_seam_follow_a<N>_plus`` and
+``_seam_follow_a<N>_minus``. Only the final selected seam check and projected-frequency log, together with the concise
+``<label>_seam_follow.log`` selection record, remain in the main calculation directory. This is a projected seam-mode
+displacement followed by constrained MECP reoptimization; it does not invoke Gaussian IRC/QRC.
 
 Branch optimizations use at least the tight convergence thresholds. If both directions return to a seam saddle, the
 default displacement sequence is 0.05, 0.10, and 0.20 Å. Attempt labels contain ``_a1_``, ``_a2_``, or ``_a3_`` so
