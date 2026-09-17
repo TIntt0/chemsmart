@@ -107,6 +107,26 @@ def click_mecp_frequency_options(function):
                 "analysis (default: 1e-3)."
             ),
         ),
+        click.option(
+            "--follow-seam-imaginary-mode/--no-follow-seam-imaginary-mode",
+            default=False,
+            show_default=True,
+            help=(
+                "If the projected MECP Hessian has a significant imaginary "
+                "mode, displace in both directions, reoptimize both MECPs, "
+                "and retain the lower seam minimum. Implies --mecp-numfreq."
+            ),
+        ),
+        click.option(
+            "--seam-mode-displacement",
+            type=click.FloatRange(min=0.0, min_open=True),
+            default=0.05,
+            show_default=True,
+            help=(
+                "Cartesian norm (Angstrom) of each +/- projected-mode "
+                "displacement used by --follow-seam-imaginary-mode."
+            ),
+        ),
     )
     for option in reversed(options):
         function = option(function)

@@ -155,6 +155,8 @@ def mecp(
     verify_seam_minimum,
     mecp_numfreq,
     hess_step_size,
+    follow_seam_imaginary_mode,
+    seam_mode_displacement,
     restart,
     skip_completed,
     **kwargs,
@@ -266,7 +268,11 @@ def mecp(
     if step_size_max is not None:
         mecp_settings.step_size_max = step_size_max
     mecp_settings.verify_seam_minimum = verify_seam_minimum
-    mecp_settings.mecp_numfreq = mecp_numfreq
+    mecp_settings.mecp_numfreq = (
+        mecp_numfreq or follow_seam_imaginary_mode
+    )
+    mecp_settings.follow_seam_imaginary_mode = follow_seam_imaginary_mode
+    mecp_settings.seam_mode_displacement = seam_mode_displacement
     mecp_settings.restart = restart
     if hess_step_size is not None:
         mecp_settings.hess_step_size = hess_step_size

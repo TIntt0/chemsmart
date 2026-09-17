@@ -200,6 +200,17 @@ MECP Options
       -  1.0×10⁻³ Bohr
       -  Finite-difference step size used by ``--verify-seam-minimum`` or ``--mecp-numfreq`` for the numerical Hessian.
 
+   -  -  ``--follow-seam-imaginary-mode / --no-follow-seam-imaginary-mode``
+      -  bool
+      -  False
+      -  If the projected Hessian contains a significant imaginary mode, displace the structure in both directions,
+         reoptimize both MECP branches, and retain the lower verified seam minimum. Implies ``--mecp-numfreq``.
+
+   -  -  ``--seam-mode-displacement``
+      -  float
+      -  0.05 Å
+      -  Cartesian norm of each positive/negative projected-mode displacement.
+
 .. _convergence-presets:
 
 Convergence Presets
@@ -470,6 +481,21 @@ projected frequencies and modes:
 
    chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 mecp \
        --convergence tight --mecp-numfreq
+
+To escape a stationary point that is a saddle on the crossing seam, add
+``--follow-seam-imaginary-mode``. CHEMSMART writes the positive and negative displaced structures, runs an independent
+MECP optimization and projected-frequency check from each, and selects the lower branch only if it has no significant
+projected imaginary frequency:
+
+.. code:: bash
+
+   chemsmart sub gaussian -p project -f structure.xyz -c 0 -m 1 mecp \
+       --convergence tight --follow-seam-imaginary-mode \
+       --seam-mode-displacement 0.05
+
+The branch labels end in ``_seam_follow_plus`` and ``_seam_follow_minus``. A concise selection record is written to
+``<label>_seam_follow.log``. This is a projected seam-mode displacement followed by constrained MECP reoptimization;
+it does not invoke Gaussian IRC/QRC.
 
 The verification requires **4 × 3N** additional Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
 coordinates), labelled ``<label>_check_step1_A``, ``<label>_check_step2_A``, etc. For a 10-atom molecule this is 120

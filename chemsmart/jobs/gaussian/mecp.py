@@ -67,6 +67,8 @@ _MECP_ONLY_KEYS = frozenset(
         "verify_seam_minimum",
         "mecp_numfreq",
         "hess_step_size",
+        "follow_seam_imaginary_mode",
+        "seam_mode_displacement",
         "restart",
     }
 )
@@ -1363,6 +1365,7 @@ class GaussianMECPJob(GaussianJob):
         result = self.verify_seam_minimum(
             write_frequencies=self.settings.mecp_numfreq
         )
+        self._last_seam_result = result
         status = (
             "MINIMUM"
             if result["is_minimum"]
@@ -1373,10 +1376,124 @@ class GaussianMECPJob(GaussianJob):
             f"(n_negative={result['n_negative']})"
         )
         if not result["is_minimum"]:
+            if self.settings.follow_seam_imaginary_mode:
+                result = self._follow_seam_imaginary_mode(result)
+                self._last_seam_result = result
+                return result
             raise RuntimeError(
                 f"Converged crossing is not a minimum on the seam "
                 f"({result['n_negative']} negative eigenvalue(s))."
             )
+        return result
+
+    def _write_mode_displacement_xyz(self, path, positions, comment):
+        """Write a projected-mode displacement as an XYZ structure."""
+        with open(path, "w", encoding="utf-8") as output:
+            output.write(f"{len(self.molecule.symbols)}\n{comment}\n")
+            for symbol, position in zip(self.molecule.symbols, positions):
+                output.write(
+                    f"{symbol:<3s} {position[0]:+16.10f} "
+                    f"{position[1]:+16.10f} {position[2]:+16.10f}\n"
+                )
+
+    def _follow_seam_imaginary_mode(self, result):
+        """Reoptimize both sides of the lowest projected imaginary mode."""
+        frequencies = np.asarray(result.get("frequencies", []), dtype=float)
+        modes = np.asarray(result.get("modes", []), dtype=float)
+        if not len(frequencies) or modes.shape[0] != len(frequencies):
+            raise RuntimeError(
+                "Seam-mode following requires projected frequency modes."
+            )
+
+        mode_index = int(np.argmin(frequencies))
+        if frequencies[mode_index] >= 0.0:
+            return result
+
+        base_positions = np.asarray(result["positions_angstrom"], dtype=float)
+        mode = modes[mode_index].reshape(base_positions.shape)
+        displacement = self.settings.seam_mode_displacement * mode
+        candidates = []
+
+        for suffix, sign in (("plus", 1.0), ("minus", -1.0)):
+            positions = base_positions + sign * displacement
+            branch_label = f"{self.label}_seam_follow_{suffix}"
+            xyz_file = os.path.join(self.folder, f"{branch_label}.xyz")
+            self._write_mode_displacement_xyz(
+                xyz_file,
+                positions,
+                (
+                    f"{self.label}: {sign:+.0f} displacement along mode "
+                    f"{mode_index + 1} ({frequencies[mode_index]:.6f} cm^-1), "
+                    f"norm={self.settings.seam_mode_displacement:.6f} Angstrom"
+                ),
+            )
+
+            molecule = self.molecule.copy()
+            molecule.positions = positions
+            settings = self.settings.copy()
+            settings.follow_seam_imaginary_mode = False
+            settings.verify_seam_minimum = True
+            settings.mecp_numfreq = True
+            settings.restart = False
+            branch = self.__class__(
+                molecule=molecule,
+                settings=settings,
+                label=branch_label,
+                jobrunner=self.jobrunner,
+                skip_completed=False,
+            )
+            branch.set_folder(self.folder)
+            try:
+                branch.run()
+            except RuntimeError as error:
+                logger.warning(
+                    "Seam-mode %s branch did not yield a minimum: %s",
+                    suffix,
+                    error,
+                )
+            branch_result = getattr(branch, "_last_seam_result", None)
+            if branch_result is not None and branch_result["is_minimum"]:
+                candidates.append(
+                    (branch_result["mecp_energy"], branch_result, suffix)
+                )
+
+        if not candidates:
+            raise RuntimeError(
+                "Neither projected-mode displacement converged to a seam "
+                "minimum. The +/- XYZ structures and branch reports were "
+                "kept for inspection."
+            )
+
+        _, selected, selected_suffix = min(
+            candidates, key=lambda item: item[0]
+        )
+        self.molecule.positions = np.asarray(
+            selected["positions_angstrom"], dtype=float
+        )
+        self._write_seam_check_log(selected, self.settings.hess_step_size, 1)
+        self._write_mecp_frequency_log(selected, self.settings.hess_step_size)
+        summary_file = os.path.join(
+            self.folder, f"{self.label}_seam_follow.log"
+        )
+        with open(summary_file, "w", encoding="utf-8") as output:
+            output.write("CHEMSMART MECP projected seam-mode following\n")
+            output.write(
+                f"source_frequency={frequencies[mode_index]:+.6f} cm^-1\n"
+            )
+            output.write(
+                f"displacement={self.settings.seam_mode_displacement:.6f} "
+                "Angstrom\n"
+            )
+            output.write(f"selected_branch={selected_suffix}\n")
+            output.write(
+                f"selected_mecp_energy={selected['mecp_energy']:+.12f} "
+                "Hartree\nstatus=MECP MINIMUM\n"
+            )
+        logger.info(
+            "Seam-mode following selected the %s verified MECP minimum.",
+            selected_suffix,
+        )
+        return selected
 
     def _write_seam_check_log(self, result, h, step_prefix):
         """Write the seam-minimum verification results to a log file."""
