@@ -1198,6 +1198,8 @@ class GaussianMECPJobSettings(GaussianJobSettings):
         hess_step_size=1.0e-3,  # Bohr; finite-difference displacement for numerical Hessian
         follow_seam_imaginary_mode=False,
         seam_mode_displacement=0.05,
+        seam_mode_max_attempts=3,
+        seam_mode_displacement_growth=2.0,
         restart=True,
         **kwargs,
     ):
@@ -1274,6 +1276,8 @@ class GaussianMECPJobSettings(GaussianJobSettings):
         self.hess_step_size = hess_step_size
         self.follow_seam_imaginary_mode = follow_seam_imaginary_mode
         self.seam_mode_displacement = seam_mode_displacement
+        self.seam_mode_max_attempts = seam_mode_max_attempts
+        self.seam_mode_displacement_growth = seam_mode_displacement_growth
         self.restart = restart
 
         positive_values = {
@@ -1292,11 +1296,17 @@ class GaussianMECPJobSettings(GaussianJobSettings):
             "harvey_max_condition": harvey_max_condition,
             "hess_step_size": hess_step_size,
             "seam_mode_displacement": seam_mode_displacement,
+            "seam_mode_max_attempts": seam_mode_max_attempts,
+            "seam_mode_displacement_growth": seam_mode_displacement_growth,
         }
         invalid = [name for name, value in positive_values.items() if value <= 0]
         if invalid:
             raise ValueError(
                 "MECP settings must be positive: " + ", ".join(invalid)
+            )
+        if seam_mode_displacement_growth <= 1.0:
+            raise ValueError(
+                "seam_mode_displacement_growth must be greater than 1.0."
             )
         if step_size_min > step_size_max:
             raise ValueError("step_size_min cannot exceed step_size_max.")

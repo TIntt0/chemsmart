@@ -157,6 +157,8 @@ def mecp(
     hess_step_size,
     follow_seam_imaginary_mode,
     seam_mode_displacement,
+    seam_mode_max_attempts,
+    seam_mode_displacement_growth,
     restart,
     skip_completed,
     **kwargs,
@@ -273,6 +275,10 @@ def mecp(
     )
     mecp_settings.follow_seam_imaginary_mode = follow_seam_imaginary_mode
     mecp_settings.seam_mode_displacement = seam_mode_displacement
+    mecp_settings.seam_mode_max_attempts = seam_mode_max_attempts
+    mecp_settings.seam_mode_displacement_growth = (
+        seam_mode_displacement_growth
+    )
     mecp_settings.restart = restart
     if hess_step_size is not None:
         mecp_settings.hess_step_size = hess_step_size

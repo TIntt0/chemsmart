@@ -209,7 +209,17 @@ MECP Options
    -  -  ``--seam-mode-displacement``
       -  float
       -  0.05 Å
-      -  Cartesian norm of each positive/negative projected-mode displacement.
+      -  Initial Cartesian norm of each positive/negative projected-mode displacement.
+
+   -  -  ``--seam-mode-max-attempts``
+      -  int
+      -  3
+      -  Maximum number of adaptive displacement attempts when both branches return to seam saddles.
+
+   -  -  ``--seam-mode-displacement-growth``
+      -  float
+      -  2.0
+      -  Factor by which the displacement is increased after an unsuccessful pair of branches.
 
 .. _convergence-presets:
 
@@ -493,9 +503,13 @@ projected imaginary frequency:
        --convergence tight --follow-seam-imaginary-mode \
        --seam-mode-displacement 0.05
 
-The branch labels end in ``_seam_follow_plus`` and ``_seam_follow_minus``. A concise selection record is written to
+The branch labels end in ``_seam_follow_a<N>_plus`` and ``_seam_follow_a<N>_minus``. A concise selection record is written to
 ``<label>_seam_follow.log``. This is a projected seam-mode displacement followed by constrained MECP reoptimization;
 it does not invoke Gaussian IRC/QRC.
+
+Branch optimizations use at least the tight convergence thresholds. If both directions return to a seam saddle, the
+default displacement sequence is 0.05, 0.10, and 0.20 Å. Attempt labels contain ``_a1_``, ``_a2_``, or ``_a3_`` so
+that all intermediate structures and reports remain available for diagnosis.
 
 The verification requires **4 × 3N** additional Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
 coordinates), labelled ``<label>_check_step1_A``, ``<label>_check_step2_A``, etc. For a 10-atom molecule this is 120
