@@ -69,6 +69,7 @@ _MECP_ONLY_KEYS = frozenset(
         "hess_step_size",
         "follow_seam_imaginary_mode",
         "seam_mode_displacement",
+        "seam_mode_max_steps",
         "restart",
     }
 )
@@ -1396,8 +1397,142 @@ class GaussianMECPJob(GaussianJob):
                     f"{position[1]:+16.10f} {position[2]:+16.10f}\n"
                 )
 
+    @staticmethod
+    def _constrained_seam_displacement(
+        energy_diff,
+        progress_error,
+        grad_a,
+        grad_b,
+        progress_mode,
+        step_size,
+    ):
+        """Return a step tangent to the crossing seam and progress plane.
+
+        The two linearized constraints are ``E_A - E_B = 0`` and
+        ``mode . (x - x_plane) = 0``.  A minimum-norm correction restores
+        both constraints, while the state-A gradient is projected into their
+        common null space before taking the downhill step.
+        """
+        diff_grad = np.asarray(grad_a, dtype=float).ravel() - np.asarray(
+            grad_b, dtype=float
+        ).ravel()
+        mode = np.asarray(progress_mode, dtype=float).ravel()
+        mode_norm = float(np.linalg.norm(mode))
+        if mode_norm <= np.finfo(float).tiny:
+            raise RuntimeError("Seam-following mode has zero norm.")
+        mode /= mode_norm
+
+        constraints = np.vstack((diff_grad, mode))
+        gram = constraints @ constraints.T
+        if np.linalg.cond(gram) > 1.0e12:
+            raise RuntimeError(
+                "Energy-gap and mode-following constraints are linearly "
+                "dependent."
+            )
+
+        correction_rhs = np.array([-energy_diff, -progress_error])
+        correction = constraints.T @ np.linalg.solve(gram, correction_rhs)
+        gradient = np.asarray(grad_a, dtype=float).ravel()
+        gradient_multipliers = np.linalg.solve(gram, constraints @ gradient)
+        tangent_gradient = gradient - constraints.T @ gradient_multipliers
+        displacement = correction - step_size * tangent_gradient
+        return (
+            displacement.reshape(np.asarray(grad_a).shape),
+            tangent_gradient.reshape(np.asarray(grad_a).shape),
+            correction.reshape(np.asarray(grad_a).shape),
+        )
+
+    def _optimize_on_seam_progress_plane(
+        self,
+        positions_bohr,
+        plane_point_bohr,
+        progress_mode,
+        trace,
+        macro_step,
+    ):
+        """Optimize all seam coordinates except one fixed progress mode."""
+        positions = np.asarray(positions_bohr, dtype=float).copy()
+        plane_point = np.asarray(plane_point_bohr, dtype=float)
+        mode = np.asarray(progress_mode, dtype=float).ravel()
+        mode /= np.linalg.norm(mode)
+        displacement = np.zeros_like(positions)
+        current_step_size = self.settings.step_size
+
+        self.steps_folder = os.path.join(self.folder, f"{self.label}_steps")
+        os.makedirs(self.steps_folder, exist_ok=True)
+        self._state_checkpoint_files = {}
+        self._last_spin_squared = {"A": None, "B": None}
+
+        for inner_step in range(1, self.settings.max_steps + 1):
+            step_index = macro_step * (self.settings.max_steps + 1) + inner_step
+            ea, grad_a = self._run_state(positions, step_index, "A")
+            eb, grad_b = self._run_state(positions, step_index, "B")
+            progress_error = float(
+                np.dot((positions - plane_point).ravel(), mode)
+            )
+            displacement, tangent_gradient, _correction = (
+                self._constrained_seam_displacement(
+                    energy_diff=ea - eb,
+                    progress_error=progress_error,
+                    grad_a=grad_a,
+                    grad_b=grad_b,
+                    progress_mode=mode,
+                    step_size=current_step_size,
+                )
+            )
+            displacement = self._apply_trust_radius(displacement)
+            trace.write(
+                f"macro_step={macro_step} inner_step={inner_step} "
+                f"E_A={ea:.10f} E_B={eb:.10f} dE={ea-eb:+.6e} "
+                f"progress_error={progress_error:+.6e} "
+                f"tangent_grad_max={np.max(np.abs(tangent_gradient)):.3e} "
+                f"displacement_max={np.max(np.abs(displacement)):.3e}\n"
+            )
+
+            constraints_converged = (
+                abs(ea - eb) <= self.settings.energy_diff_tol
+                and abs(progress_error) <= self.settings.disp_max_tol
+            )
+            if constraints_converged and self._is_converged(
+                energy_diff=ea - eb,
+                eff_grad=tangent_gradient,
+                displacement=displacement,
+            ):
+                self.molecule.positions = positions * units.Bohr
+                return positions
+
+            positions = positions + displacement
+
+        raise RuntimeError(
+            "Constrained seam optimization did not converge within "
+            f"{self.settings.max_steps} steps."
+        )
+
+    @staticmethod
+    def _overlap_tracked_negative_mode(result, previous_mode):
+        """Select and orient the negative mode overlapping the prior mode."""
+        modes = np.asarray(result["modes"], dtype=float)
+        eigenvalues = np.asarray(result["frequency_eigenvalues"], dtype=float)
+        negative = np.flatnonzero(eigenvalues < -1.0e-6)
+        if not len(negative):
+            return None, None, None
+
+        previous = np.asarray(previous_mode, dtype=float).ravel()
+        previous /= np.linalg.norm(previous)
+        overlaps = np.array(
+            [np.dot(modes[index].ravel(), previous) for index in negative]
+        )
+        selected = int(negative[np.argmax(np.abs(overlaps))])
+        signed_overlap = float(overlaps[np.argmax(np.abs(overlaps))])
+        mode = modes[selected].ravel()
+        if signed_overlap < 0.0:
+            mode = -mode
+            signed_overlap = -signed_overlap
+        mode /= np.linalg.norm(mode)
+        return selected, mode, signed_overlap
+
     def _follow_seam_imaginary_mode(self, result):
-        """Reoptimize both sides of the lowest projected imaginary mode."""
+        """Follow a negative seam mode with a constrained progress plane."""
         frequencies = np.asarray(result.get("frequencies", []), dtype=float)
         modes = np.asarray(result.get("modes", []), dtype=float)
         if not len(frequencies) or modes.shape[0] != len(frequencies):
@@ -1413,29 +1548,29 @@ class GaussianMECPJob(GaussianJob):
         mode = modes[mode_index].reshape(base_positions.shape)
         candidates = []
         displacement_norm = self.settings.seam_mode_displacement
-        displacement = displacement_norm * mode
+        displacement_bohr = displacement_norm / units.Bohr
         follow_folder = os.path.join(
             self.folder, f"{self.label}_seam_follow"
         )
         os.makedirs(follow_folder, exist_ok=True)
 
-        for suffix, sign in (("plus", 1.0), ("minus", -1.0)):
-            positions = base_positions + sign * displacement
-            branch_label = f"{self.label}_seam_follow_{suffix}"
-            xyz_file = os.path.join(follow_folder, f"{branch_label}.xyz")
-            self._write_mode_displacement_xyz(
-                xyz_file,
-                positions,
-                (
-                    f"{self.label}: {sign:+.0f} displacement along mode "
-                    f"{mode_index + 1} "
-                    f"({frequencies[mode_index]:.6f} cm^-1), "
-                    f"norm={displacement_norm:.6f} Angstrom"
-                ),
+        summary_file = os.path.join(
+            self.folder, f"{self.label}_seam_follow.log"
+        )
+        with open(summary_file, "w", encoding="utf-8") as summary:
+            summary.write("CHEMSMART constrained MECP seam-mode following\n")
+            summary.write(
+                f"source_frequency={frequencies[mode_index]:+.6f} cm^-1\n"
+                f"progress_step={displacement_norm:.6f} Angstrom\n"
             )
 
+        for suffix, sign in (("plus", 1.0), ("minus", -1.0)):
+            tracked_mode = sign * mode.ravel()
+            current_bohr = base_positions / units.Bohr
+            branch_label = f"{self.label}_seam_follow_{suffix}"
+            xyz_file = os.path.join(follow_folder, f"{branch_label}.xyz")
             molecule = self.molecule.copy()
-            molecule.positions = positions
+            molecule.positions = base_positions
             settings = self.settings.copy()
             settings.follow_seam_imaginary_mode = False
             settings.verify_seam_minimum = True
@@ -1468,7 +1603,73 @@ class GaussianMECPJob(GaussianJob):
                 skip_completed=False,
             )
             branch.set_folder(follow_folder)
+            trace_file = os.path.join(
+                follow_folder, f"{branch_label}_mode_follow.log"
+            )
             try:
+                with open(trace_file, "w", encoding="utf-8") as trace:
+                    trace.write(
+                        "CHEMSMART constrained MECP seam-mode branch\n"
+                        f"branch={suffix}\n"
+                    )
+                    for macro_step in range(
+                        1, self.settings.seam_mode_max_steps + 1
+                    ):
+                        plane_point = (
+                            current_bohr + displacement_bohr * tracked_mode
+                        )
+                        self._write_mode_displacement_xyz(
+                            xyz_file,
+                            plane_point * units.Bohr,
+                            (
+                                f"{self.label}: constrained {suffix} "
+                                f"macro step {macro_step}"
+                            ),
+                        )
+                        current_bohr = branch._optimize_on_seam_progress_plane(
+                            positions_bohr=plane_point,
+                            plane_point_bohr=plane_point,
+                            progress_mode=tracked_mode,
+                            trace=trace,
+                            macro_step=macro_step,
+                        )
+                        branch.molecule.positions = current_bohr * units.Bohr
+                        step_result = branch.verify_seam_minimum(
+                            write_frequencies=True,
+                            step_prefix=(
+                                macro_step
+                                * (settings.max_steps + 6 * len(mode) + 10)
+                            ),
+                        )
+                        selected, next_mode, overlap = (
+                            self._overlap_tracked_negative_mode(
+                                step_result, tracked_mode
+                            )
+                        )
+                        trace.write(
+                            f"macro_step={macro_step} "
+                            f"mecp_energy={step_result['mecp_energy']:+.12f} "
+                            f"n_negative={step_result['n_negative']}"
+                        )
+                        if next_mode is None:
+                            trace.write(" status=NEGATIVE_MODE_CROSSED\n")
+                            break
+                        trace.write(
+                            f" tracked_mode={selected + 1} "
+                            f"frequency={step_result['frequencies'][selected]:+.6f} "
+                            f"overlap={overlap:.6f}\n"
+                        )
+                        tracked_mode = next_mode
+                    else:
+                        raise RuntimeError(
+                            "Negative seam mode remains after "
+                            f"{self.settings.seam_mode_max_steps} constrained "
+                            "following steps."
+                        )
+
+                # Release the progress coordinate only after the constrained
+                # Hessian no longer contains a significant negative mode.
+                branch.molecule.positions = current_bohr * units.Bohr
                 branch.run()
             except RuntimeError as error:
                 logger.warning(
@@ -1497,18 +1698,7 @@ class GaussianMECPJob(GaussianJob):
         )
         self._write_seam_check_log(selected, self.settings.hess_step_size, 1)
         self._write_mecp_frequency_log(selected, self.settings.hess_step_size)
-        summary_file = os.path.join(
-            self.folder, f"{self.label}_seam_follow.log"
-        )
-        with open(summary_file, "w", encoding="utf-8") as output:
-            output.write("CHEMSMART MECP projected seam-mode following\n")
-            output.write(
-                f"source_frequency={frequencies[mode_index]:+.6f} cm^-1\n"
-            )
-            output.write(
-                f"displacement={displacement_norm:.6f} "
-                "Angstrom\n"
-            )
+        with open(summary_file, "a", encoding="utf-8") as output:
             output.write(f"selected_branch={selected_suffix}\n")
             output.write(
                 f"selected_mecp_energy={selected['mecp_energy']:+.12f} "

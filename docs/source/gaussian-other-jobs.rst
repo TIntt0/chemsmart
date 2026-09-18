@@ -203,13 +203,18 @@ MECP Options
    -  -  ``--follow-seam-imaginary-mode / --no-follow-seam-imaginary-mode``
       -  bool
       -  False
-      -  If the projected Hessian contains a significant imaginary mode, displace the structure in both directions,
-         reoptimize both MECP branches, and retain the lower verified seam minimum. Implies ``--mecp-numfreq``.
+      -  If the projected Hessian contains a significant imaginary mode, follow it in both directions using constrained
+         progress planes, then release and retain the lower verified seam minimum. Implies ``--mecp-numfreq``.
 
    -  -  ``--seam-mode-displacement``
       -  float
       -  0.05 Å
-      -  Cartesian norm of each positive/negative projected-mode displacement.
+      -  Progress increment along the tracked projected mode at each constrained macro step.
+
+   -  -  ``--seam-mode-max-steps``
+      -  int
+      -  8
+      -  Maximum constrained mode-following macro steps in each positive/negative direction.
 
 .. _convergence-presets:
 
@@ -483,30 +488,33 @@ projected frequencies and modes:
        --convergence tight --mecp-numfreq
 
 To escape a stationary point that is a saddle on the crossing seam, add
-``--follow-seam-imaginary-mode``. CHEMSMART writes the positive and negative displaced structures, runs an independent
-MECP optimization and projected-frequency check from each, and selects the lower branch only if it has no significant
-projected imaginary frequency:
+``--follow-seam-imaginary-mode``. In each direction CHEMSMART fixes a progress plane normal to the tracked negative
+mode, restores :math:`E_A=E_B`, and optimizes every remaining seam coordinate. It then recomputes the effective Hessian,
+identifies the continuation of the mode by maximum absolute overlap, and advances the progress plane again. The progress
+constraint is released only after no significant negative projected mode remains; a final unconstrained MECP optimization
+and frequency check must still confirm the result:
 
 .. code:: bash
 
    chemsmart sub gaussian -p project -f structure.xyz -c 0 -m 1 mecp \
        --convergence tight --follow-seam-imaginary-mode \
-       --seam-mode-displacement 0.05
+       --seam-mode-displacement 0.05 --seam-mode-max-steps 8
 
 All displaced structures, branch reports, trajectories, frequency logs, and Gaussian sub-jobs are collected under
 ``<label>_seam_follow/``. Branch labels end in ``_seam_follow_plus`` and
 ``_seam_follow_minus``. Only the final selected seam check and projected-frequency log, together with the concise
-``<label>_seam_follow.log`` selection record, remain in the main calculation directory. This is a projected seam-mode
-displacement followed by constrained MECP reoptimization; it does not invoke Gaussian IRC/QRC.
+``<label>_seam_follow.log`` selection record, remain in the main calculation directory. This is constrained iterative
+seam-mode following; it does not invoke Gaussian IRC/QRC.
 
-Branch optimizations use at least the tight convergence thresholds. If both directions return to a seam saddle, the
-calculation stops and retains both branch results. The user can then rerun with a different
-``--seam-mode-displacement`` value.
+Branch optimizations use at least the tight convergence thresholds. If neither direction loses its negative mode within
+``--seam-mode-max-steps``, or if the released optimization returns to a saddle, the calculation stops and retains both
+branch results. The user can then adjust the progress increment or maximum number of macro steps.
 
-The verification requires **4 × 3N** additional Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
+Each Hessian evaluation requires **4 × 3N** Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
 coordinates), labelled ``<label>_check_step1_A``, ``<label>_check_step2_A``, etc. For a 10-atom molecule this is 120
-additional Gaussian calculations. The finite-difference step size (default 1×10⁻³ Bohr) can be adjusted with
-``--hess-step-size``.
+Gaussian calculations per macro step. Iterative following performs this analysis after every constrained macro step in
+both directions, plus the initial and final checks, so users should choose ``--seam-mode-max-steps`` conservatively.
+The finite-difference step size (default 1×10⁻³ Bohr) can be adjusted with ``--hess-step-size``.
 
 Results are written to ``<label>_seam_check.log``:
 

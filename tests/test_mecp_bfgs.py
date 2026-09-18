@@ -639,6 +639,51 @@ def test_convergence_requires_every_threshold():
     assert not job._is_converged(0.05, gradient, displacement * 2)
 
 
+def test_constrained_seam_step_restores_both_linear_constraints():
+    grad_a = np.array([[2.0, 1.0, 3.0]])
+    grad_b = np.array([[1.0, 1.0, 3.0]])
+    mode = np.array([0.0, 1.0, 0.0])
+
+    displacement, tangent_gradient, correction = (
+        GaussianMECPJob._constrained_seam_displacement(
+            energy_diff=0.2,
+            progress_error=0.3,
+            grad_a=grad_a,
+            grad_b=grad_b,
+            progress_mode=mode,
+            step_size=0.1,
+        )
+    )
+
+    diff_grad = (grad_a - grad_b).ravel()
+    np.testing.assert_allclose(np.dot(diff_grad, correction.ravel()), -0.2)
+    np.testing.assert_allclose(np.dot(mode, correction.ravel()), -0.3)
+    np.testing.assert_allclose(np.dot(diff_grad, tangent_gradient.ravel()), 0.0)
+    np.testing.assert_allclose(np.dot(mode, tangent_gradient.ravel()), 0.0)
+    np.testing.assert_allclose(displacement, [[-0.2, -0.3, -0.3]])
+
+
+def test_negative_mode_tracking_uses_overlap_and_preserves_orientation():
+    result = {
+        "frequency_eigenvalues": np.array([-3.0, -2.0, 1.0]),
+        "modes": np.array(
+            [
+                [1.0, 0.0, 0.0],
+                [0.0, -1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        ),
+    }
+
+    index, mode, overlap = GaussianMECPJob._overlap_tracked_negative_mode(
+        result, np.array([0.1, 0.9, 0.0])
+    )
+
+    assert index == 1
+    assert overlap > 0.99
+    np.testing.assert_allclose(mode, [0.0, 1.0, 0.0])
+
+
 def test_numerical_hessian_uses_central_differences_and_symmetrizes():
     job = object.__new__(GaussianMECPJob)
     job.molecule = SimpleNamespace(symbols=["H"])

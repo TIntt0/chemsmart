@@ -127,6 +127,16 @@ def click_mecp_frequency_options(function):
                 "displacement used by --follow-seam-imaginary-mode."
             ),
         ),
+        click.option(
+            "--seam-mode-max-steps",
+            type=click.IntRange(min=1),
+            default=8,
+            show_default=True,
+            help=(
+                "Maximum constrained mode-following steps in each +/- "
+                "direction."
+            ),
+        ),
     )
     for option in reversed(options):
         function = option(function)

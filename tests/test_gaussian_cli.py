@@ -1251,6 +1251,11 @@ class TestGaussianCLIMecpCommand:
                 "--mecp-numfreq",
                 "--hess-step-size",
                 "0.002",
+                "--follow-seam-imaginary-mode",
+                "--seam-mode-displacement",
+                "0.08",
+                "--seam-mode-max-steps",
+                "5",
             ],
             make_cli_ctx_obj(gaussian_jobrunner_no_scratch),
         )
@@ -1260,6 +1265,9 @@ class TestGaussianCLIMecpCommand:
         assert settings.verify_seam_minimum is True
         assert settings.mecp_numfreq is True
         assert settings.hess_step_size == 0.002
+        assert settings.follow_seam_imaginary_mode is True
+        assert settings.seam_mode_displacement == 0.08
+        assert settings.seam_mode_max_steps == 5
 
 
 class TestGaussianCLILinkMecpCommand:
