@@ -684,6 +684,18 @@ def test_negative_mode_tracking_uses_overlap_and_preserves_orientation():
     np.testing.assert_allclose(mode, [0.0, 1.0, 0.0])
 
 
+def test_mode_displacement_reshapes_flat_mode_to_cartesian_geometry():
+    positions = np.zeros((2, 3))
+    mode = np.arange(6, dtype=float)
+
+    displaced = GaussianMECPJob._displace_along_mode(
+        positions, mode, distance=0.1
+    )
+
+    assert displaced.shape == (2, 3)
+    np.testing.assert_allclose(displaced, 0.1 * mode.reshape(2, 3))
+
+
 def test_numerical_hessian_uses_central_differences_and_symmetrizes():
     job = object.__new__(GaussianMECPJob)
     job.molecule = SimpleNamespace(symbols=["H"])

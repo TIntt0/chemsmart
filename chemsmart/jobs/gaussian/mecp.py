@@ -1377,7 +1377,7 @@ class GaussianMECPJob(GaussianJob):
             f"(n_negative={result['n_negative']})"
         )
         if not result["is_minimum"]:
-            if self.settings.follow_seam_imaginary_mode:
+            if getattr(self.settings, "follow_seam_imaginary_mode", False):
                 result = self._follow_seam_imaginary_mode(result)
                 self._last_seam_result = result
                 return result
@@ -1465,7 +1465,17 @@ class GaussianMECPJob(GaussianJob):
 
         for inner_step in range(1, self.settings.max_steps + 1):
             step_index = macro_step * (self.settings.max_steps + 1) + inner_step
+            trace.write(
+                f"macro_step={macro_step} inner_step={inner_step} "
+                "status=RUNNING_STATE_A\n"
+            )
+            trace.flush()
             ea, grad_a = self._run_state(positions, step_index, "A")
+            trace.write(
+                f"macro_step={macro_step} inner_step={inner_step} "
+                "status=RUNNING_STATE_B\n"
+            )
+            trace.flush()
             eb, grad_b = self._run_state(positions, step_index, "B")
             progress_error = float(
                 np.dot((positions - plane_point).ravel(), mode)
@@ -1530,6 +1540,17 @@ class GaussianMECPJob(GaussianJob):
             signed_overlap = -signed_overlap
         mode /= np.linalg.norm(mode)
         return selected, mode, signed_overlap
+
+    @staticmethod
+    def _displace_along_mode(positions, mode, distance):
+        """Displace an ``(N, 3)`` geometry along a flattened normal mode."""
+        positions = np.asarray(positions, dtype=float)
+        mode = np.asarray(mode, dtype=float)
+        if mode.size != positions.size:
+            raise ValueError(
+                "Normal-mode size does not match the Cartesian geometry."
+            )
+        return positions + distance * mode.reshape(positions.shape)
 
     def _follow_seam_imaginary_mode(self, result):
         """Follow a negative seam mode with a constrained progress plane."""
@@ -1615,9 +1636,16 @@ class GaussianMECPJob(GaussianJob):
                     for macro_step in range(
                         1, self.settings.seam_mode_max_steps + 1
                     ):
-                        plane_point = (
-                            current_bohr + displacement_bohr * tracked_mode
+                        plane_point = self._displace_along_mode(
+                            current_bohr,
+                            tracked_mode,
+                            displacement_bohr,
                         )
+                        trace.write(
+                            f"macro_step={macro_step} "
+                            "status=CONSTRAINED_OPTIMIZATION\n"
+                        )
+                        trace.flush()
                         self._write_mode_displacement_xyz(
                             xyz_file,
                             plane_point * units.Bohr,
@@ -1634,6 +1662,11 @@ class GaussianMECPJob(GaussianJob):
                             macro_step=macro_step,
                         )
                         branch.molecule.positions = current_bohr * units.Bohr
+                        trace.write(
+                            f"macro_step={macro_step} "
+                            "status=COMPUTING_PROJECTED_HESSIAN\n"
+                        )
+                        trace.flush()
                         step_result = branch.verify_seam_minimum(
                             write_frequencies=True,
                             step_prefix=(
