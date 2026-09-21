@@ -135,14 +135,7 @@ class Thermochemistry:
         **kwargs,
     ):
         self.filename = filename
-        self._mecp_output = None
-        with open(filename, encoding="utf-8", errors="replace") as stream:
-            first_line = stream.readline().strip()
-        if first_line == MECPProjectedFrequencyOutput.HEADER:
-            self._mecp_output = MECPProjectedFrequencyOutput(filename)
-            self.molecule = self._mecp_output.molecule
-        else:
-            self.molecule = Molecule.from_filepath(filename)
+        self.molecule = self._load_molecule(filename)
         self.electronic_degeneracy = electronic_degeneracy
         self.energy_units = energy_units
         self.check_imaginary_frequencies = check_imaginary_frequencies
@@ -210,11 +203,13 @@ class Thermochemistry:
             else None
         )
 
+    def _load_molecule(self, filename):
+        """Load the molecular data used by the shared thermochemistry formulas."""
+        return Molecule.from_filepath(filename)
+
     @cached_property
     def file_object(self):
         """Open the file and return the file object."""
-        if self._mecp_output is not None:
-            return self._mecp_output
         program = get_program_type_from_file(self.filename)
         if program == "gaussian":
             output = Gaussian16Output(self.filename)
@@ -1481,6 +1476,31 @@ class Thermochemistry:
             out.write(build_row())
 
         logger.info(f"Thermochemistry results saved to {outputfile}")
+
+
+class MECPThermochemistry(Thermochemistry):
+    """Thermochemistry from projected MECP modes using the shared formulas.
+
+    The MECP reader supplies the seam energy, geometry, projected frequencies,
+    and symmetry number. Its default electronic statistical weight is one;
+    callers may override it through ``electronic_degeneracy``.
+    """
+
+    def _load_molecule(self, filename):
+        return self.file_object.molecule
+
+    @cached_property
+    def file_object(self):
+        """Read the dedicated CHEMSMART MECP frequency output."""
+        return MECPProjectedFrequencyOutput(self.filename)
+
+
+def thermochemistry_from_file(filename, **kwargs):
+    """Select the analysis class from file contents, independent of its name."""
+    with open(filename, encoding="utf-8", errors="replace") as stream:
+        is_mecp = stream.readline().strip() == MECPProjectedFrequencyOutput.HEADER
+    analysis_class = MECPThermochemistry if is_mecp else Thermochemistry
+    return analysis_class(filename=filename, **kwargs)
 
 
 class BoltzmannAverageThermochemistry(Thermochemistry):

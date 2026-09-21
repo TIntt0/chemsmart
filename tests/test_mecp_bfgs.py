@@ -6,7 +6,11 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from chemsmart.analysis.thermochemistry import Thermochemistry
+from chemsmart.analysis.thermochemistry import (
+    MECPThermochemistry,
+    Thermochemistry,
+    thermochemistry_from_file,
+)
 from chemsmart.cli.gaussian.mecp_options import add_mecp_method_suffix
 from chemsmart.io.gaussian.output import Gaussian16Output
 from chemsmart.jobs.gaussian.mecp import GaussianMECPJob
@@ -228,7 +232,7 @@ def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
 
     job._write_mecp_frequency_log(result, 1.0e-3)
     frequency_file = tmp_path / "crossing_mecp_freq.log"
-    thermochemistry = Thermochemistry(
+    thermochemistry = thermochemistry_from_file(
         str(frequency_file),
         temperature=298.15,
         electronic_degeneracy=4,
@@ -238,6 +242,8 @@ def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
         jobrunner=object(),
     )
 
+    assert isinstance(thermochemistry, MECPThermochemistry)
+    assert isinstance(thermochemistry, Thermochemistry)
     assert thermochemistry.jobtype == "mecp"
     assert thermochemistry.vibrational_frequencies == pytest.approx([1234.5])
     assert thermochemistry.file_object.energies == pytest.approx([-0.99999])

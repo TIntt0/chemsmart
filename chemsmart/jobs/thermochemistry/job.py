@@ -12,7 +12,7 @@ from typing import Type
 
 from chemsmart.analysis.thermochemistry import (
     MECPProjectedFrequencyOutput,
-    Thermochemistry,
+    thermochemistry_from_file,
 )
 from chemsmart.io.molecules.structure import Molecule
 from chemsmart.jobs.job import Job
@@ -299,7 +299,7 @@ class ThermochemistryJob(Job):
             self.settings.outputfile = self.outputfile
 
         try:
-            thermochemistry = Thermochemistry(
+            thermochemistry = thermochemistry_from_file(
                 filename=self.filename,
                 temperature=self.settings.temperature,
                 concentration=self.settings.concentration,

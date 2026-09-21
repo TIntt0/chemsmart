@@ -8,6 +8,7 @@ from ase import units
 from chemsmart.analysis.thermochemistry import (
     BoltzmannAverageThermochemistry,
     Thermochemistry,
+    thermochemistry_from_file,
 )
 from chemsmart.io.gaussian.output import Gaussian16Output
 from chemsmart.io.molecules.structure import Molecule
@@ -23,6 +24,16 @@ from chemsmart.utils.constants import (
 
 
 class TestThermochemistry:
+    def test_factory_preserves_gaussian_analysis(self, gaussian_singlet_opt_outfile):
+        analysis = thermochemistry_from_file(
+            gaussian_singlet_opt_outfile, temperature=298.15
+        )
+        original = Thermochemistry(
+            gaussian_singlet_opt_outfile, temperature=298.15
+        )
+        assert type(analysis) is Thermochemistry
+        assert analysis.vibrational_frequencies == original.vibrational_frequencies
+
     def test_thermochemistry_from_gaussian_output(
         self, gaussian_singlet_opt_outfile
     ):
