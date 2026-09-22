@@ -727,6 +727,49 @@ def test_numerical_hessian_uses_central_differences_and_symmetrizes():
     assert calls[-1] == (15, "B", "check")
 
 
+def test_follow_seam_hessian_uses_macro_coordinate_and_sign_labels():
+    job = object.__new__(GaussianMECPJob)
+    job.molecule = SimpleNamespace(symbols=["H"])
+    calls = []
+
+    def run_state(positions, step, state, checkpoint_tag=None):
+        calls.append((step, state, checkpoint_tag))
+        return 0.0, np.asarray(positions, dtype=float)
+
+    job._run_state = run_state
+    job._compute_numerical_hessian(
+        np.zeros((1, 3)), h=1.0e-3, step_prefix=1, macro_step=7
+    )
+
+    assert calls[0] == ("macro07_check_coord01_plus", "A", "check")
+    assert calls[3] == ("macro07_check_coord01_minus", "B", "check")
+    assert calls[-1] == ("macro07_check_coord03_minus", "B", "check")
+
+
+def test_follow_seam_inner_steps_use_macro_labels(tmp_path):
+    job = _driver_job(tmp_path)
+    job.settings.max_steps = 2
+    seen = []
+
+    def run_state(positions, step, state):
+        seen.append((step, state))
+        gradient = (
+            np.array([[1.0, 0.0, 0.0]]) if state == "A" else np.zeros((1, 3))
+        )
+        return 0.0, gradient
+
+    job._run_state = run_state
+    job._optimize_on_seam_progress_plane(
+        positions_bohr=np.zeros((1, 3)),
+        plane_point_bohr=np.zeros((1, 3)),
+        progress_mode=np.array([0.0, 1.0, 0.0]),
+        trace=StringIO(),
+        macro_step=7,
+    )
+
+    assert seen == [("macro07_inner001", "A"), ("macro07_inner001", "B")]
+
+
 def test_lagrangian_hessian_rejects_identical_gradients():
     gradient = np.ones((1, 3))
     with pytest.raises(RuntimeError, match="Difference gradient is too small"):
@@ -829,6 +872,79 @@ def test_mecp_driver_writes_final_marker_on_convergence(tmp_path):
     assert "Optimization converged at step 1." in report
     assert report.endswith("Converged at step 1.\n")
     assert Path(job.trajectory_file).is_file()
+
+
+def test_mecp_report_distinguishes_initial_saddle_and_final_minimum(tmp_path):
+    job = _driver_job(tmp_path)
+    job.settings.mecp_numfreq = True
+    job._mecp_displacement = lambda **kwargs: (
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+    )
+    job._run_state = lambda positions, step, state: (
+        0.0,
+        np.zeros((1, 3)),
+    )
+    initial = {
+        "is_minimum": False,
+        "n_negative": 1,
+        "frequencies": np.array([-38.7, 250.0]),
+    }
+    final = {
+        "mecp_energy": -505.7320073265,
+        "energy_diff": -9.241e-6,
+        "n_negative": 0,
+    }
+
+    def verify(_positions):
+        job._initial_seam_result = initial
+        job._selected_seam_follow_branch = "minus"
+        job._selected_seam_follow_macro_steps = 11
+        return final
+
+    job._run_seam_minimum_check = verify
+    job._run()
+
+    report = Path(job.report_file).read_text(encoding="utf-8")
+    assert "Initial MECP optimization converged at step 1." in report
+    assert "Initial seam status: SADDLE" in report
+    assert "Initial lowest projected frequency=-38.700000 cm^-1" in report
+    assert "Seam following: completed; selected branch=minus" in report
+    assert "Seam-following macro steps=11" in report
+    assert "Final significant imaginary modes=0" in report
+    assert "Final status: VERIFIED MECP MINIMUM" in report
+    assert report.endswith("Converged at step 1.\n")
+
+
+def test_default_seam_mode_max_steps_is_thirty():
+    settings = GaussianMECPJobSettings()
+    assert settings.seam_mode_max_steps == 30
+
+
+def test_mecp_report_records_failed_seam_verification(tmp_path):
+    job = _driver_job(tmp_path)
+    job.settings.verify_seam_minimum = True
+    job._mecp_displacement = lambda **kwargs: (
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+    )
+    job._run_state = lambda positions, step, state: (
+        0.0,
+        np.zeros((1, 3)),
+    )
+
+    def fail(_positions):
+        raise RuntimeError("No verified seam minimum")
+
+    job._run_seam_minimum_check = fail
+    with pytest.raises(RuntimeError, match="No verified seam minimum"):
+        job._run()
+
+    report = Path(job.report_file).read_text(encoding="utf-8")
+    assert "Final status: FAILED SEAM VERIFICATION" in report
+    assert "Converged at step 1.\n" not in report
 
 
 def test_mecp_driver_raises_when_max_steps_are_exhausted(tmp_path):

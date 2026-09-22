@@ -1198,7 +1198,7 @@ class GaussianMECPJobSettings(GaussianJobSettings):
         hess_step_size=1.0e-3,  # Bohr; finite-difference displacement for numerical Hessian
         follow_seam_imaginary_mode=False,
         seam_mode_displacement=0.05,
-        seam_mode_max_steps=8,
+        seam_mode_max_steps=30,
         restart=True,
         **kwargs,
     ):

@@ -358,8 +358,11 @@ class GaussianMECPJob(GaussianJob):
             title=f"{title} step {step_idx}",
             state=state,
         )
-        job_tag = f"{checkpoint_tag}_" if checkpoint_tag else ""
-        state_label = f"{self.label}_{job_tag}step{step_idx}_{state}"
+        if isinstance(step_idx, str):
+            state_label = f"{self.label}_{step_idx}_{state}"
+        else:
+            job_tag = f"{checkpoint_tag}_" if checkpoint_tag else ""
+            state_label = f"{self.label}_{job_tag}step{step_idx}_{state}"
 
         checkpoint_key = (checkpoint_tag, state)
         oldchkfile = self._state_checkpoint_files.get(checkpoint_key)
@@ -970,10 +973,58 @@ class GaussianMECPJob(GaussianJob):
 
         self.molecule.positions = positions_bohr * units.Bohr
 
+        seam_result = None
         if self.settings.verify_seam_minimum or self.settings.mecp_numfreq:
-            self._run_seam_minimum_check(positions_bohr)
+            try:
+                seam_result = self._run_seam_minimum_check(positions_bohr)
+            except Exception as error:
+                with open(self.report_file, "a", encoding="utf-8") as report:
+                    report.write(
+                        f"Initial MECP optimization converged at step "
+                        f"{converged_step}.\n"
+                        f"Final status: FAILED SEAM VERIFICATION "
+                        f"({type(error).__name__}: {error})\n"
+                    )
+                raise
 
         with open(self.report_file, "a", encoding="utf-8") as report:
+            report.write(
+                f"Initial MECP optimization converged at step "
+                f"{converged_step}.\n"
+            )
+            if seam_result is not None:
+                initial = self._initial_seam_result
+                report.write(
+                    "Initial seam status: "
+                    f"{'MINIMUM' if initial['is_minimum'] else 'SADDLE'}; "
+                    f"significant imaginary modes={initial['n_negative']}\n"
+                )
+                if not initial["is_minimum"] and "frequencies" in initial:
+                    report.write(
+                        "Initial lowest projected frequency="
+                        f"{np.min(initial['frequencies']):+.6f} cm^-1\n"
+                    )
+                if not initial["is_minimum"]:
+                    report.write(
+                        "Seam following: completed; selected branch="
+                        f"{self._selected_seam_follow_branch}\n"
+                        "Seam-following macro steps="
+                        f"{self._selected_seam_follow_macro_steps}\n"
+                    )
+                report.write(
+                    f"Final MECP energy={seam_result['mecp_energy']:+.12f} "
+                    "Hartree\n"
+                    f"Final energy gap={seam_result['energy_diff']:+.6e} "
+                    "Hartree\n"
+                    "Final significant imaginary modes="
+                    f"{seam_result['n_negative']}\n"
+                    "Final status: VERIFIED MECP MINIMUM\n"
+                )
+                if self.settings.mecp_numfreq:
+                    report.write(
+                        f"Final geometry and frequencies: "
+                        f"{self.label}_mecp_freq.log\n"
+                    )
             report.write(f"Converged at step {converged_step}.\n")
         if os.path.isfile(self.state_file):
             os.remove(self.state_file)
@@ -1158,7 +1209,9 @@ class GaussianMECPJob(GaussianJob):
         hessian = (1.0 - multiplier) * hessian_a + multiplier * hessian_b
         return hessian, multiplier
 
-    def _compute_numerical_hessian(self, positions_bohr, h, step_prefix):
+    def _compute_numerical_hessian(
+        self, positions_bohr, h, step_prefix, macro_step=None
+    ):
         """
         Compute both state Hessians numerically via central finite differences
         of the Cartesian forces.
@@ -1205,8 +1258,13 @@ class GaussianMECPJob(GaussianJob):
             pos_minus = pos.copy()
             pos_minus[atom_idx, coord_idx] -= h
 
-            step_p = step_prefix + 2 * j
-            step_m = step_prefix + 2 * j + 1
+            if macro_step is None:
+                step_p = step_prefix + 2 * j
+                step_m = step_prefix + 2 * j + 1
+            else:
+                coord = f"macro{macro_step:02d}_check_coord{j + 1:02d}"
+                step_p = f"{coord}_plus"
+                step_m = f"{coord}_minus"
 
             _, g_A_plus = self._run_state(
                 pos_plus, step_p, "A", checkpoint_tag="check"
@@ -1229,7 +1287,11 @@ class GaussianMECPJob(GaussianJob):
         return H_A, H_B
 
     def verify_seam_minimum(
-        self, h=None, step_prefix=1, write_frequencies=False
+        self,
+        h=None,
+        step_prefix=1,
+        write_frequencies=False,
+        macro_step=None,
     ):
         """
         Verify that the current MECP geometry is a **minimum on the crossing
@@ -1282,11 +1344,16 @@ class GaussianMECPJob(GaussianJob):
         logger.info(
             f"verify_seam_minimum: computing gradient difference at {self.label}"
         )
+        reference_step = (
+            step_prefix
+            if macro_step is None
+            else f"macro{macro_step:02d}_check_reference"
+        )
         ea, grad_a = self._run_state(
-            positions_bohr, step_prefix, "A", checkpoint_tag="check"
+            positions_bohr, reference_step, "A", checkpoint_tag="check"
         )
         eb, grad_b = self._run_state(
-            positions_bohr, step_prefix, "B", checkpoint_tag="check"
+            positions_bohr, reference_step, "B", checkpoint_tag="check"
         )
         diff_grad = grad_a - grad_b
 
@@ -1295,7 +1362,10 @@ class GaussianMECPJob(GaussianJob):
             f"(h={h} Bohr, {4 * 3 * len(self.molecule.symbols)} sub-jobs)"
         )
         H_A, H_B = self._compute_numerical_hessian(
-            positions_bohr, h=h, step_prefix=step_prefix + 1
+            positions_bohr,
+            h=h,
+            step_prefix=step_prefix + 1,
+            macro_step=macro_step,
         )
 
         H_lagrangian, lagrange_multiplier = self._lagrangian_hessian(
@@ -1366,6 +1436,7 @@ class GaussianMECPJob(GaussianJob):
         result = self.verify_seam_minimum(
             write_frequencies=self.settings.mecp_numfreq
         )
+        self._initial_seam_result = result
         self._last_seam_result = result
         status = (
             "MINIMUM"
@@ -1464,7 +1535,7 @@ class GaussianMECPJob(GaussianJob):
         self._last_spin_squared = {"A": None, "B": None}
 
         for inner_step in range(1, self.settings.max_steps + 1):
-            step_index = macro_step * (self.settings.max_steps + 1) + inner_step
+            step_index = f"macro{macro_step:02d}_inner{inner_step:03d}"
             trace.write(
                 f"macro_step={macro_step} inner_step={inner_step} "
                 "status=RUNNING_STATE_A\n"
@@ -1669,10 +1740,7 @@ class GaussianMECPJob(GaussianJob):
                         trace.flush()
                         step_result = branch.verify_seam_minimum(
                             write_frequencies=True,
-                            step_prefix=(
-                                macro_step
-                                * (settings.max_steps + 6 * len(mode) + 10)
-                            ),
+                            macro_step=macro_step,
                         )
                         selected, next_mode, overlap = (
                             self._overlap_tracked_negative_mode(
@@ -1713,7 +1781,12 @@ class GaussianMECPJob(GaussianJob):
             branch_result = getattr(branch, "_last_seam_result", None)
             if branch_result is not None and branch_result["is_minimum"]:
                 candidates.append(
-                    (branch_result["mecp_energy"], branch_result, suffix)
+                    (
+                        branch_result["mecp_energy"],
+                        branch_result,
+                        suffix,
+                        macro_step,
+                    )
                 )
 
         if not candidates:
@@ -1723,9 +1796,11 @@ class GaussianMECPJob(GaussianJob):
                 "kept for inspection."
             )
 
-        _, selected, selected_suffix = min(
+        _, selected, selected_suffix, selected_macro_steps = min(
             candidates, key=lambda item: item[0]
         )
+        self._selected_seam_follow_branch = selected_suffix
+        self._selected_seam_follow_macro_steps = selected_macro_steps
         self.molecule.positions = np.asarray(
             selected["positions_angstrom"], dtype=float
         )
@@ -1733,6 +1808,7 @@ class GaussianMECPJob(GaussianJob):
         self._write_mecp_frequency_log(selected, self.settings.hess_step_size)
         with open(summary_file, "a", encoding="utf-8") as output:
             output.write(f"selected_branch={selected_suffix}\n")
+            output.write(f"selected_macro_steps={selected_macro_steps}\n")
             output.write(
                 f"selected_mecp_energy={selected['mecp_energy']:+.12f} "
                 "Hartree\nstatus=MECP MINIMUM\n"

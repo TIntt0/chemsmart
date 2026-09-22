@@ -213,7 +213,7 @@ MECP Options
 
    -  -  ``--seam-mode-max-steps``
       -  int
-      -  8
+      -  30
       -  Maximum constrained mode-following macro steps in each positive/negative direction.
 
 .. _convergence-presets:
@@ -419,8 +419,11 @@ The main output files are produced in the job directory; Gaussian sub-job input/
    -  ``seam_max`` / ``seam_rms`` — max and RMS of the seam-correction component :math:`\mathbf{d}_\text{seam} =
       -(\Delta E / \|\mathbf{g}_\Delta\|^2)\,\mathbf{g}_\Delta` that moves the geometry toward the crossing surface.
 
-   The final line reads ``Converged at step N.`` on successful convergence. The presence of this ``Converged`` marker is
-   used by ``skip_completed`` to avoid re-running a finished job.
+   After optimization, the report distinguishes the initial crossing from the final verified MECP. If seam-mode
+   following was needed, it names the selected branch, reports its number of macro steps, and records the final energy,
+   energy gap, and number of
+   significant imaginary modes. If seam verification fails, it records the error instead. Only a successful job ends
+   with ``Converged at step N.``; this marker is used by ``skip_completed`` to avoid re-running a finished job.
 
 ``<label>_traj.xyz``
    Multi-frame XYZ trajectory of the MECP geometry at every optimization step (coordinates in Ångström).
@@ -498,7 +501,7 @@ and frequency check must still confirm the result:
 
    chemsmart sub gaussian -p project -f structure.xyz -c 0 -m 1 mecp \
        --convergence tight --follow-seam-imaginary-mode \
-       --seam-mode-displacement 0.05 --seam-mode-max-steps 8
+       --seam-mode-displacement 0.05 --seam-mode-max-steps 30
 
 All displaced structures, branch reports, trajectories, frequency logs, and Gaussian sub-jobs are collected under
 ``<label>_seam_follow/``. Branch labels end in ``_seam_follow_plus`` and
@@ -511,7 +514,10 @@ Branch optimizations use at least the tight convergence thresholds. If neither d
 branch results. The user can then adjust the progress increment or maximum number of macro steps.
 
 Each Hessian evaluation requires **4 × 3N** Gaussian sub-jobs (2 displaced geometries × 2 spin states × 3N Cartesian
-coordinates), labelled ``<label>_check_step1_A``, ``<label>_check_step2_A``, etc. For a 10-atom molecule this is 120
+coordinates). During seam-mode following, labels identify the macro step, coordinate, displacement sign, and state,
+such as ``<label>_seam_follow_plus_macro07_check_coord18_plus_B.log``. Constrained optimization sub-jobs use names such as
+``<label>_seam_follow_plus_macro07_inner012_A.log``. Standalone seam checks retain the original ``check_stepN`` naming.
+For a 10-atom molecule this is 120
 Gaussian calculations per macro step. Iterative following performs this analysis after every constrained macro step in
 both directions, plus the initial and final checks, so users should choose ``--seam-mode-max-steps`` conservatively.
 The finite-difference step size (default 1×10⁻³ Bohr) can be adjusted with ``--hess-step-size``.

@@ -130,7 +130,7 @@ def click_mecp_frequency_options(function):
         click.option(
             "--seam-mode-max-steps",
             type=click.IntRange(min=1),
-            default=8,
+            default=30,
             show_default=True,
             help=(
                 "Maximum constrained mode-following steps in each +/- "
