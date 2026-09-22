@@ -172,7 +172,6 @@ def link(
     step_size_min,
     step_size_max,
     restart,
-    verify_seam_minimum,
     mecp_numfreq,
     hess_step_size,
     follow_seam_imaginary_mode,
@@ -209,7 +208,6 @@ def link(
             step_size_min=step_size_min,
             step_size_max=step_size_max,
             restart=restart,
-            verify_seam_minimum=verify_seam_minimum,
             mecp_numfreq=mecp_numfreq,
             hess_step_size=hess_step_size,
             follow_seam_imaginary_mode=follow_seam_imaginary_mode,
@@ -341,7 +339,6 @@ def _link_mecp(
     step_size_min,
     step_size_max,
     restart,
-    verify_seam_minimum,
     mecp_numfreq,
     hess_step_size,
     follow_seam_imaginary_mode,
@@ -453,7 +450,6 @@ def _link_mecp(
     if step_size_max is not None:
         mecp_settings.step_size_max = step_size_max
     mecp_settings.restart = restart
-    mecp_settings.verify_seam_minimum = verify_seam_minimum
     mecp_settings.mecp_numfreq = (
         mecp_numfreq or follow_seam_imaginary_mode
     )

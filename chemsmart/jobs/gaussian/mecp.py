@@ -64,7 +64,6 @@ _MECP_ONLY_KEYS = frozenset(
         "harvey_max_condition",
         "use_link",
         "convergence_preset",
-        "verify_seam_minimum",
         "mecp_numfreq",
         "hess_step_size",
         "follow_seam_imaginary_mode",
@@ -156,11 +155,27 @@ class GaussianMECPJob(GaussianJob):
 
     @property
     def report_file(self):
-        return os.path.join(self.folder, f"{self.label}_report.log")
+        return os.path.join(
+            self.optimization_folder, f"{self.label}_report.log"
+        )
+
+    @property
+    def optimization_folder(self):
+        return os.path.join(self.folder, f"{self.label}_optimization")
+
+    @property
+    def numfreq_folder(self):
+        return os.path.join(self.folder, f"{self.label}_numfreq")
+
+    @property
+    def final_report_file(self):
+        return os.path.join(self.folder, f"{self.label}_final_report.log")
 
     @property
     def trajectory_file(self):
-        return os.path.join(self.folder, f"{self.label}_traj.xyz")
+        return os.path.join(
+            self.optimization_folder, f"{self.label}_traj.xyz"
+        )
 
     @property
     def state_file(self):
@@ -253,9 +268,11 @@ class GaussianMECPJob(GaussianJob):
             converged = any(line.startswith("Converged at step") for line in f)
         if not converged:
             return False
-        if self.settings.verify_seam_minimum or self.settings.mecp_numfreq:
+        if self.settings.mecp_numfreq:
             if not os.path.isfile(
-                os.path.join(self.folder, f"{self.label}_seam_check.log")
+                os.path.join(
+                    self.numfreq_folder, f"{self.label}_seam_check.log"
+                )
             ):
                 return False
         if self.settings.mecp_numfreq:
@@ -379,7 +396,11 @@ class GaussianMECPJob(GaussianJob):
             "label": state_label,
             "jobrunner": self.jobrunner,
             "skip_completed": False,
-            "scratch_parent_folder": f"{self.label}_steps",
+            "scratch_parent_folder": (
+                f"{self.label}_numfreq"
+                if checkpoint_tag == "check"
+                else f"{self.label}_optimization"
+            ),
             "checkpoint_filename": (
                 f"{self.label}_{checkpoint_part}{state}.chk"
             ),
@@ -391,7 +412,13 @@ class GaussianMECPJob(GaussianJob):
             job = GaussianLinkJob(**job_kwargs)
         else:
             job = GaussianGeneralJob(**job_kwargs)
-        job.set_folder(self.steps_folder)
+        job_folder = (
+            self.numfreq_folder
+            if checkpoint_tag == "check"
+            else self.steps_folder
+        )
+        os.makedirs(job_folder, exist_ok=True)
+        job.set_folder(job_folder)
         job.oldchkfile = oldchkfile
         job.run()
         output = job._output()
@@ -794,7 +821,7 @@ class GaussianMECPJob(GaussianJob):
         inv_hessian = None
         prev_eff_grad = None
         prev_positions_bfgs = None
-        self.steps_folder = os.path.join(self.folder, f"{self.label}_steps")
+        self.steps_folder = self.optimization_folder
         os.makedirs(self.steps_folder, exist_ok=True)
         self._state_checkpoint_files = {}
         self._last_spin_squared = {"A": None, "B": None}
@@ -919,6 +946,14 @@ class GaussianMECPJob(GaussianJob):
                     eff_grad=projected_grad,
                     displacement=displacement,
                 ):
+                    self._final_optimization_steps = step_idx
+                    self._final_convergence_metrics = {
+                        "energy_diff": energy_diff,
+                        "pgrad_max": float(np.max(np.abs(projected_grad))),
+                        "pgrad_rms": self._rms(projected_grad),
+                        "disp_max": float(np.max(np.abs(displacement))),
+                        "disp_rms": self._rms(displacement),
+                    }
                     report.write(
                         f"Optimization converged at step {step_idx}.\n"
                     )
@@ -974,7 +1009,7 @@ class GaussianMECPJob(GaussianJob):
         self.molecule.positions = positions_bohr * units.Bohr
 
         seam_result = None
-        if self.settings.verify_seam_minimum or self.settings.mecp_numfreq:
+        if self.settings.mecp_numfreq:
             try:
                 seam_result = self._run_seam_minimum_check(positions_bohr)
             except Exception as error:
@@ -1026,8 +1061,92 @@ class GaussianMECPJob(GaussianJob):
                         f"{self.label}_mecp_freq.log\n"
                     )
             report.write(f"Converged at step {converged_step}.\n")
+        if not getattr(self, "_is_seam_follow_branch", False):
+            self._write_final_report(
+                initial_steps=converged_step,
+                initial_energy_a=ea,
+                initial_energy_b=eb,
+                seam_result=seam_result,
+            )
         if os.path.isfile(self.state_file):
             os.remove(self.state_file)
+
+    def _write_final_report(
+        self, initial_steps, initial_energy_a, initial_energy_b, seam_result
+    ):
+        """Summarize only the selected final structure and its convergence."""
+        result = seam_result or {}
+        metrics = result.get(
+            "convergence_metrics", self._final_convergence_metrics
+        )
+        energy_a = result.get("energy_a", initial_energy_a)
+        energy_b = result.get("energy_b", initial_energy_b)
+        positions = np.asarray(
+            result.get("positions_angstrom", self.molecule.positions),
+            dtype=float,
+        )
+        thresholds = {
+            "energy_diff": self.settings.energy_diff_tol,
+            "pgrad_max": self.settings.force_max_tol,
+            "pgrad_rms": self.settings.force_rms_tol,
+            "disp_max": self.settings.disp_max_tol,
+            "disp_rms": self.settings.disp_rms_tol,
+        }
+        with open(self.final_report_file, "w", encoding="utf-8") as report:
+            report.write("CHEMSMART final MECP result\n")
+            report.write(f"label={self.label}\n")
+            report.write(f"initial_optimization_steps={initial_steps}\n")
+            macro_steps = getattr(
+                self, "_selected_seam_follow_macro_steps", 0
+            )
+            report.write(f"seam_follow_macro_steps={macro_steps}\n")
+            if macro_steps:
+                report.write(
+                    "seam_follow_selected_branch="
+                    f"{self._selected_seam_follow_branch}\n"
+                )
+                report.write(
+                    "final_branch_optimization_steps="
+                    f"{result.get('optimization_steps', 'NA')}\n"
+                )
+            report.write(f"energy_A={energy_a:+.12f} Hartree\n")
+            report.write(f"energy_B={energy_b:+.12f} Hartree\n")
+            report.write(
+                f"mecp_energy={0.5 * (energy_a + energy_b):+.12f} "
+                "Hartree\n"
+            )
+            report.write("\nFinal convergence criteria:\n")
+            for name, threshold in thresholds.items():
+                value = metrics[name]
+                if name == "energy_diff":
+                    value = abs(value)
+                unit = "Hartree" if name == "energy_diff" else (
+                    "Hartree/Bohr" if name.startswith("pgrad") else "Bohr"
+                )
+                report.write(
+                    f"{name}: value={value:.6e} "
+                    f"threshold={threshold:.6e} {unit} "
+                    f"status={'PASS' if value <= threshold else 'FAIL'}\n"
+                )
+            if seam_result is not None:
+                report.write(
+                    "\nseam_minimum="
+                    f"{'PASS' if result.get('is_minimum', True) else 'FAIL'}\n"
+                    f"significant_imaginary_modes={result['n_negative']}\n"
+                    f"frequency_file={self.label}_mecp_freq.log\n"
+                )
+            else:
+                report.write("\nseam_minimum=NOT_CHECKED\n")
+            report.write("\nFinal geometry (Angstrom):\n")
+            for symbol, position in zip(self.molecule.symbols, positions):
+                report.write(
+                    f"{symbol:>3s} {position[0]:+16.8f} "
+                    f"{position[1]:+16.8f} {position[2]:+16.8f}\n"
+                )
+            if "frequencies" in result:
+                report.write("\nProjected MECP frequencies (cm^-1):\n")
+                for index, frequency in enumerate(result["frequencies"], 1):
+                    report.write(f"mode {index:4d}: {frequency:+14.6f}\n")
 
     # ------------------------------------------------------------------
     # Seam-minimum verification via effective Hessian analysis
@@ -1316,7 +1435,7 @@ class GaussianMECPJob(GaussianJob):
             This analysis requires **4 × 3N** additional Gaussian sub-jobs
             (see :meth:`_compute_numerical_hessian`).  Call it only on the
             converged geometry.  Trigger automatically via the
-            ``--verify-seam-minimum`` or ``--mecp-numfreq`` CLI flag.
+            ``--mecp-numfreq`` CLI flag.
 
         Args:
             h (float, optional): Finite-difference step size in Bohr.
@@ -1529,7 +1648,7 @@ class GaussianMECPJob(GaussianJob):
         displacement = np.zeros_like(positions)
         current_step_size = self.settings.step_size
 
-        self.steps_folder = os.path.join(self.folder, f"{self.label}_steps")
+        self.steps_folder = self.optimization_folder
         os.makedirs(self.steps_folder, exist_ok=True)
         self._state_checkpoint_files = {}
         self._last_spin_squared = {"A": None, "B": None}
@@ -1647,7 +1766,7 @@ class GaussianMECPJob(GaussianJob):
         os.makedirs(follow_folder, exist_ok=True)
 
         summary_file = os.path.join(
-            self.folder, f"{self.label}_seam_follow.log"
+            follow_folder, f"{self.label}_seam_follow.log"
         )
         with open(summary_file, "w", encoding="utf-8") as summary:
             summary.write("CHEMSMART constrained MECP seam-mode following\n")
@@ -1665,7 +1784,6 @@ class GaussianMECPJob(GaussianJob):
             molecule.positions = base_positions
             settings = self.settings.copy()
             settings.follow_seam_imaginary_mode = False
-            settings.verify_seam_minimum = True
             settings.mecp_numfreq = True
             settings.restart = False
             # A loose optimization can declare convergence before the
@@ -1694,6 +1812,7 @@ class GaussianMECPJob(GaussianJob):
                 jobrunner=self.jobrunner,
                 skip_completed=False,
             )
+            branch._is_seam_follow_branch = True
             branch.set_folder(follow_folder)
             trace_file = os.path.join(
                 follow_folder, f"{branch_label}_mode_follow.log"
@@ -1780,6 +1899,12 @@ class GaussianMECPJob(GaussianJob):
                 )
             branch_result = getattr(branch, "_last_seam_result", None)
             if branch_result is not None and branch_result["is_minimum"]:
+                branch_result["convergence_metrics"] = (
+                    branch._final_convergence_metrics
+                )
+                branch_result["optimization_steps"] = (
+                    branch._final_optimization_steps
+                )
                 candidates.append(
                     (
                         branch_result["mecp_energy"],
@@ -1821,8 +1946,9 @@ class GaussianMECPJob(GaussianJob):
 
     def _write_seam_check_log(self, result, h, step_prefix):
         """Write the seam-minimum verification results to a log file."""
+        os.makedirs(self.numfreq_folder, exist_ok=True)
         seam_check_file = os.path.join(
-            self.folder, f"{self.label}_seam_check.log"
+            self.numfreq_folder, f"{self.label}_seam_check.log"
         )
         with open(seam_check_file, "w", encoding="utf-8") as f:
             f.write("CHEMSMART MECP seam-minimum verification\n")

@@ -334,6 +334,7 @@ def test_job_is_complete_requires_post_verification_marker(tmp_path):
     job.folder = str(tmp_path)
     job.label = "verified"
     report = Path(job.report_file)
+    report.parent.mkdir()
     report.write_text("Optimization converged at step 8.\n", encoding="utf-8")
 
     assert job._job_is_complete() is False
@@ -342,14 +343,110 @@ def test_job_is_complete_requires_post_verification_marker(tmp_path):
     assert job._job_is_complete() is True
 
 
+def test_mecp_output_paths_follow_functional_layout(tmp_path):
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+
+    assert Path(job.final_report_file) == tmp_path / "crossing_final_report.log"
+    assert Path(job.report_file) == (
+        tmp_path / "crossing_optimization" / "crossing_report.log"
+    )
+    assert Path(job.trajectory_file) == (
+        tmp_path / "crossing_optimization" / "crossing_traj.xyz"
+    )
+    assert Path(job.numfreq_folder) == tmp_path / "crossing_numfreq"
+
+
+def test_state_subjobs_are_routed_by_calculation_phase(tmp_path, monkeypatch):
+    import chemsmart.jobs.gaussian.mecp as mecp_module
+
+    calls = []
+
+    class Molecule:
+        symbols = ["H"]
+
+        def __init__(self):
+            self.positions = np.zeros((1, 3))
+
+        def copy(self):
+            return Molecule()
+
+    class FakeSubjob:
+        def __init__(self, **kwargs):
+            self.label = kwargs["label"]
+            self.scratch_parent_folder = kwargs["scratch_parent_folder"]
+            self.chkfile = str(tmp_path / "missing.chk")
+
+        def set_folder(self, folder):
+            self.folder = folder
+
+        def run(self):
+            calls.append(
+                (self.label, Path(self.folder), self.scratch_parent_folder)
+            )
+
+        def _output(self):
+            return SimpleNamespace(
+                energies=[-1.0],
+                forces=[np.zeros((1, 3))],
+                spin_squared_after_annihilation=None,
+            )
+
+    monkeypatch.setattr(mecp_module, "GaussianGeneralJob", FakeSubjob)
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    job.jobrunner = object()
+    job.molecule = Molecule()
+    job.settings = SimpleNamespace(
+        charge_a=0,
+        charge_b=0,
+        multiplicity_a=1,
+        multiplicity_b=3,
+        title_a="A",
+        title_b="B",
+        use_link=False,
+    )
+    job.steps_folder = job.optimization_folder
+    job._state_checkpoint_files = {}
+    job._state_settings = lambda **kwargs: SimpleNamespace(
+        additional_route_parameters=None
+    )
+
+    job._run_state(np.zeros((1, 3)), 1, "A")
+    job._run_state(
+        np.zeros((1, 3)), "macro07_check_coord01_plus", "B", "check"
+    )
+
+    assert calls == [
+        (
+            "crossing_step1_A",
+            Path(job.optimization_folder),
+            "crossing_optimization",
+        ),
+        (
+            "crossing_macro07_check_coord01_plus_B",
+            Path(job.numfreq_folder),
+            "crossing_numfreq",
+        ),
+    ]
+    assert Path(job.optimization_folder).is_dir()
+    assert Path(job.numfreq_folder).is_dir()
+
+
 def test_completed_mecp_requires_requested_frequency_outputs(tmp_path):
     job = object.__new__(GaussianMECPJob)
     job.settings = GaussianMECPJobSettings(mecp_numfreq=True)
     job.folder = str(tmp_path)
     job.label = "crossing"
+    Path(job.optimization_folder).mkdir()
     Path(job.report_file).write_text("Converged at step 3.\n")
     assert not job._job_is_complete()
-    (tmp_path / "crossing_seam_check.log").write_text("checked\n")
+    Path(job.numfreq_folder).mkdir()
+    (Path(job.numfreq_folder) / "crossing_seam_check.log").write_text(
+        "checked\n"
+    )
     assert not job._job_is_complete()
     (tmp_path / "crossing_mecp_freq.log").write_text("frequencies\n")
     assert job._job_is_complete()
@@ -796,6 +893,27 @@ def test_seam_check_runner_accepts_minimum_and_rejects_saddle():
         job._run_seam_minimum_check(np.zeros((1, 3)))
 
 
+def test_seam_check_runner_follows_saddle_when_requested():
+    job = object.__new__(GaussianMECPJob)
+    job.label = "crossing"
+    job.settings = SimpleNamespace(
+        mecp_numfreq=True, follow_seam_imaginary_mode=True
+    )
+    saddle = {"is_minimum": False, "n_negative": 1}
+    minimum = {"is_minimum": True, "n_negative": 0}
+    job.verify_seam_minimum = lambda **kwargs: saddle
+    seen = []
+    job._follow_seam_imaginary_mode = lambda result: (
+        seen.append(result),
+        minimum,
+    )[1]
+
+    assert job._run_seam_minimum_check(np.zeros((1, 3))) is minimum
+    assert seen == [saddle]
+    assert job._initial_seam_result is saddle
+    assert job._last_seam_result is minimum
+
+
 def test_step_and_seam_logs_include_diagnostics(tmp_path):
     job = object.__new__(GaussianMECPJob)
     job.folder = str(tmp_path)
@@ -813,7 +931,7 @@ def test_step_and_seam_logs_include_diagnostics(tmp_path):
     )
     assert "step=3" in report.getvalue()
     assert "dE=+1.000000e-01" in report.getvalue()
-    assert "step_size=1.500e-01" in report.getvalue()
+    assert "step_size=1.5000e-01" in report.getvalue()
 
     job._write_seam_check_log(
         {
@@ -827,7 +945,7 @@ def test_step_and_seam_logs_include_diagnostics(tmp_path):
         1.0e-3,
         20,
     )
-    contents = (tmp_path / "crossing_seam_check.log").read_text()
+    contents = (Path(job.numfreq_folder) / "crossing_seam_check.log").read_text()
     assert "SADDLE POINT ON SEAM" in contents
     assert "** NEGATIVE **" in contents
 
@@ -844,7 +962,6 @@ def _driver_job(tmp_path, max_steps=2):
         adaptive_step_size=False,
         step_size_method="bb",
         restart=False,
-        verify_seam_minimum=False,
         mecp_numfreq=False,
         energy_diff_tol=1.0e-4,
         force_max_tol=1.0e-3,
@@ -864,6 +981,11 @@ def test_mecp_driver_writes_final_marker_on_convergence(tmp_path):
         return 0.0, np.zeros((1, 3))
 
     job._run_state = run_state
+    job._mecp_displacement = lambda **kwargs: (
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+    )
     job._run()
 
     assert states == [(1, "A"), (1, "B")]
@@ -872,6 +994,123 @@ def test_mecp_driver_writes_final_marker_on_convergence(tmp_path):
     assert "Optimization converged at step 1." in report
     assert report.endswith("Converged at step 1.\n")
     assert Path(job.trajectory_file).is_file()
+    assert Path(job.final_report_file).is_file()
+    assert "seam_minimum=NOT_CHECKED" in Path(job.final_report_file).read_text()
+    assert not Path(job.numfreq_folder).exists()
+
+
+@pytest.mark.parametrize("failed_branch", [None, "plus"])
+def test_seam_follow_selects_lower_verified_branch(tmp_path, failed_branch):
+    class Molecule:
+        symbols = ["H"]
+
+        def __init__(self):
+            self.positions = np.zeros((1, 3))
+
+        def copy(self):
+            result = Molecule()
+            result.positions = self.positions.copy()
+            return result
+
+    class FakeFollowingJob(GaussianMECPJob):
+        def __init__(self, molecule, settings, label, jobrunner, **kwargs):
+            self.molecule = molecule
+            self.settings = settings
+            self.label = label
+            self.jobrunner = jobrunner
+
+        def _optimize_on_seam_progress_plane(self, positions_bohr, **kwargs):
+            return positions_bohr
+
+        def verify_seam_minimum(self, **kwargs):
+            return {
+                "mecp_energy": -1.0,
+                "n_negative": 0,
+                "frequency_eigenvalues": np.array([1.0e-3]),
+                "frequencies": np.array([100.0]),
+                "modes": np.array([[1.0, 0.0, 0.0]]),
+            }
+
+        def run(self):
+            if failed_branch and self.label.endswith(failed_branch):
+                raise RuntimeError("Branch did not converge")
+            energy = -2.0 if self.label.endswith("minus") else -1.0
+            self._last_seam_result = {
+                "is_minimum": True,
+                "mecp_energy": energy,
+                "positions_angstrom": self.molecule.positions.copy(),
+            }
+            self._final_convergence_metrics = {"energy_diff": 0.0}
+            self._final_optimization_steps = 3
+
+    job = FakeFollowingJob(
+        molecule=Molecule(),
+        settings=GaussianMECPJobSettings(seam_mode_max_steps=1),
+        label="crossing",
+        jobrunner=object(),
+    )
+    job.folder = str(tmp_path)
+    written = []
+    job._write_seam_check_log = lambda result, *args: written.append(
+        ("check", result["mecp_energy"])
+    )
+    job._write_mecp_frequency_log = lambda result, *args: written.append(
+        ("freq", result["mecp_energy"])
+    )
+    initial = {
+        "frequencies": np.array([-40.0]),
+        "modes": np.array([[1.0, 0.0, 0.0]]),
+        "positions_angstrom": np.zeros((1, 3)),
+    }
+
+    selected = job._follow_seam_imaginary_mode(initial)
+
+    assert selected["mecp_energy"] == -2.0
+    assert selected["optimization_steps"] == 3
+    assert job._selected_seam_follow_branch == "minus"
+    assert job._selected_seam_follow_macro_steps == 1
+    assert written == [("check", -2.0), ("freq", -2.0)]
+    follow_folder = tmp_path / "crossing_seam_follow"
+    summary = (follow_folder / "crossing_seam_follow.log").read_text()
+    assert "selected_branch=minus" in summary
+    assert "selected_macro_steps=1" in summary
+    assert not (tmp_path / "crossing_seam_follow.log").exists()
+    for suffix in ("plus", "minus"):
+        assert (
+            follow_folder / f"crossing_seam_follow_{suffix}_mode_follow.log"
+        ).is_file()
+
+
+def test_seam_follow_without_imaginary_mode_creates_no_directory(tmp_path):
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    result = {
+        "frequencies": np.array([20.0]),
+        "modes": np.array([[1.0, 0.0, 0.0]]),
+    }
+
+    assert job._follow_seam_imaginary_mode(result) is result
+    assert not (tmp_path / "crossing_seam_follow").exists()
+
+
+def test_intermediate_follow_branch_has_no_final_summary(tmp_path):
+    job = _driver_job(tmp_path)
+    job._is_seam_follow_branch = True
+    job._mecp_displacement = lambda **kwargs: (
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+        np.zeros((1, 3)),
+    )
+    job._run_state = lambda positions, step, state: (
+        0.0,
+        np.zeros((1, 3)),
+    )
+
+    job._run()
+
+    assert Path(job.report_file).is_file()
+    assert not Path(job.final_report_file).exists()
 
 
 def test_mecp_report_distinguishes_initial_saddle_and_final_minimum(tmp_path):
@@ -892,9 +1131,13 @@ def test_mecp_report_distinguishes_initial_saddle_and_final_minimum(tmp_path):
         "frequencies": np.array([-38.7, 250.0]),
     }
     final = {
+        "energy_a": -505.732011947,
+        "energy_b": -505.732002706,
         "mecp_energy": -505.7320073265,
         "energy_diff": -9.241e-6,
         "n_negative": 0,
+        "is_minimum": True,
+        "positions_angstrom": np.zeros((1, 3)),
     }
 
     def verify(_positions):
@@ -915,6 +1158,10 @@ def test_mecp_report_distinguishes_initial_saddle_and_final_minimum(tmp_path):
     assert "Final significant imaginary modes=0" in report
     assert "Final status: VERIFIED MECP MINIMUM" in report
     assert report.endswith("Converged at step 1.\n")
+    final_report = Path(job.final_report_file).read_text(encoding="utf-8")
+    assert "initial_optimization_steps=1" in final_report
+    assert "seam_follow_macro_steps=11" in final_report
+    assert "mecp_energy=-505.732007326500 Hartree" in final_report
 
 
 def test_default_seam_mode_max_steps_is_thirty():
@@ -922,9 +1169,52 @@ def test_default_seam_mode_max_steps_is_thirty():
     assert settings.seam_mode_max_steps == 30
 
 
+def test_final_report_summarizes_selected_structure(tmp_path):
+    job = _driver_job(tmp_path)
+    job.molecule = SimpleNamespace(
+        symbols=["H"], positions=np.array([[0.0, 0.0, 0.0]])
+    )
+    job._final_convergence_metrics = {
+        "energy_diff": 1.0e-6,
+        "pgrad_max": 2.0e-4,
+        "pgrad_rms": 1.0e-4,
+        "disp_max": 3.0e-4,
+        "disp_rms": 2.0e-4,
+    }
+    job._selected_seam_follow_macro_steps = 11
+    job._selected_seam_follow_branch = "minus"
+    result = {
+        "energy_a": -10.0,
+        "energy_b": -10.000001,
+        "is_minimum": True,
+        "n_negative": 0,
+        "positions_angstrom": np.array([[1.0, 2.0, 3.0]]),
+        "frequencies": np.array([100.0]),
+        "convergence_metrics": {
+            **job._final_convergence_metrics,
+            "pgrad_max": 1.0e-4,
+        },
+        "optimization_steps": 4,
+    }
+
+    job._write_final_report(15, -11.0, -11.000001, result)
+
+    report = Path(job.final_report_file).read_text(encoding="utf-8")
+    assert "initial_optimization_steps=15" in report
+    assert "seam_follow_macro_steps=11" in report
+    assert "seam_follow_selected_branch=minus" in report
+    assert "final_branch_optimization_steps=4" in report
+    assert "energy_A=-10.000000000000 Hartree" in report
+    assert "pgrad_max: value=1.000000e-04" in report
+    assert "threshold=1.000000e-03 Hartree/Bohr status=PASS" in report
+    assert "seam_minimum=PASS" in report
+    assert "H      +1.00000000" in report
+    assert "mode    1:    +100.000000" in report
+
+
 def test_mecp_report_records_failed_seam_verification(tmp_path):
     job = _driver_job(tmp_path)
-    job.settings.verify_seam_minimum = True
+    job.settings.mecp_numfreq = True
     job._mecp_displacement = lambda **kwargs: (
         np.zeros((1, 3)),
         np.zeros((1, 3)),

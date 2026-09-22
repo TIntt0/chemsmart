@@ -1247,7 +1247,6 @@ class TestGaussianCLIMecpCommand:
                 "1",
                 "mecp",
                 "--no-restart",
-                "--verify-seam-minimum",
                 "--mecp-numfreq",
                 "--hess-step-size",
                 "0.002",
@@ -1262,7 +1261,6 @@ class TestGaussianCLIMecpCommand:
 
         assert result.exit_code == 0, result.output
         assert settings.restart is False
-        assert settings.verify_seam_minimum is True
         assert settings.mecp_numfreq is True
         assert settings.hess_step_size == 0.002
         assert settings.follow_seam_imaginary_mode is True

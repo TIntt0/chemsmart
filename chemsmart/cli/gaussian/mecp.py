@@ -152,7 +152,6 @@ def mecp(
     step_size_shrink,
     step_size_min,
     step_size_max,
-    verify_seam_minimum,
     mecp_numfreq,
     hess_step_size,
     follow_seam_imaginary_mode,
@@ -268,7 +267,6 @@ def mecp(
         mecp_settings.step_size_min = step_size_min
     if step_size_max is not None:
         mecp_settings.step_size_max = step_size_max
-    mecp_settings.verify_seam_minimum = verify_seam_minimum
     mecp_settings.mecp_numfreq = (
         mecp_numfreq or follow_seam_imaginary_mode
     )

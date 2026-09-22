@@ -80,15 +80,6 @@ def click_mecp_frequency_options(function):
     """Apply the common post-MECP Hessian-analysis options."""
     options = (
         click.option(
-            "--verify-seam-minimum/--no-verify-seam-minimum",
-            default=False,
-            show_default=True,
-            help=(
-                "After convergence, verify the MECP is a minimum on the "
-                "crossing seam and write <label>_seam_check.log."
-            ),
-        ),
-        click.option(
             "--mecp-numfreq/--no-mecp-numfreq",
             default=False,
             show_default=True,
