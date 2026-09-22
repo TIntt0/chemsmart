@@ -1067,6 +1067,12 @@ def test_seam_follow_selects_lower_verified_branch(tmp_path, failed_branch):
 
     assert selected["mecp_energy"] == -2.0
     assert selected["optimization_steps"] == 3
+    assert selected["convergence_thresholds"]["energy_diff"] == pytest.approx(
+        GaussianMECPJobSettings.CONVERGENCE_PRESETS["tight"]["energy_diff_tol"]
+    )
+    assert selected["convergence_thresholds"]["pgrad_max"] == pytest.approx(
+        GaussianMECPJobSettings.CONVERGENCE_PRESETS["tight"]["force_max_tol"]
+    )
     assert job._selected_seam_follow_branch == "minus"
     assert job._selected_seam_follow_macro_steps == 1
     assert written == [("check", -2.0), ("freq", -2.0)]
@@ -1194,6 +1200,13 @@ def test_final_report_summarizes_selected_structure(tmp_path):
             **job._final_convergence_metrics,
             "pgrad_max": 1.0e-4,
         },
+        "convergence_thresholds": {
+            "energy_diff": 1.0e-5,
+            "pgrad_max": 5.0e-4,
+            "pgrad_rms": 1.0e-4,
+            "disp_max": 5.0e-4,
+            "disp_rms": 3.0e-4,
+        },
         "optimization_steps": 4,
     }
 
@@ -1206,7 +1219,7 @@ def test_final_report_summarizes_selected_structure(tmp_path):
     assert "final_branch_optimization_steps=4" in report
     assert "energy_A=-10.000000000000 Hartree" in report
     assert "pgrad_max: value=1.000000e-04" in report
-    assert "threshold=1.000000e-03 Hartree/Bohr status=PASS" in report
+    assert "pgrad_max: value=1.000000e-04 threshold=5.000000e-04" in report
     assert "seam_minimum=PASS" in report
     assert "H      +1.00000000" in report
     assert "mode    1:    +100.000000" in report

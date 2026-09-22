@@ -1085,7 +1085,7 @@ class GaussianMECPJob(GaussianJob):
             result.get("positions_angstrom", self.molecule.positions),
             dtype=float,
         )
-        thresholds = {
+        thresholds = result.get("convergence_thresholds") or {
             "energy_diff": self.settings.energy_diff_tol,
             "pgrad_max": self.settings.force_max_tol,
             "pgrad_rms": self.settings.force_rms_tol,
@@ -1902,6 +1902,13 @@ class GaussianMECPJob(GaussianJob):
                 branch_result["convergence_metrics"] = (
                     branch._final_convergence_metrics
                 )
+                branch_result["convergence_thresholds"] = {
+                    "energy_diff": branch.settings.energy_diff_tol,
+                    "pgrad_max": branch.settings.force_max_tol,
+                    "pgrad_rms": branch.settings.force_rms_tol,
+                    "disp_max": branch.settings.disp_max_tol,
+                    "disp_rms": branch.settings.disp_rms_tol,
+                }
                 branch_result["optimization_steps"] = (
                     branch._final_optimization_steps
                 )
