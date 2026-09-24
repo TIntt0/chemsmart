@@ -29,6 +29,70 @@ from chemsmart.utils.references import (
 logger = logging.getLogger(__name__)
 
 
+class MECPProjectedFrequencyOutput:
+    """Read a CHEMSMART ``*_mecp_freq.log`` thermochemistry input."""
+
+    HEADER = "CHEMSMART MECP projected frequency analysis"
+
+    def __init__(self, filename):
+        self.filename = filename
+        with open(filename, encoding="utf-8") as stream:
+            self.contents = stream.read().splitlines()
+        if not self.contents or self.contents[0].strip() != self.HEADER:
+            raise ValueError(f"Not a CHEMSMART MECP frequency file: {filename}")
+
+        values = {}
+        for line in self.contents:
+            if "=" in line and not line.startswith("mode "):
+                key, value = line.split("=", 1)
+                values[key.strip()] = value.split()[0]
+
+        symbols = []
+        positions = []
+        in_geometry = False
+        for line in self.contents:
+            if line == "Geometry (Angstrom) and masses (amu):":
+                in_geometry = True
+                continue
+            if in_geometry and not line.strip():
+                break
+            if in_geometry:
+                fields = line.split()
+                symbols.append(fields[0])
+                positions.append([float(value) for value in fields[1:4]])
+
+        frequencies = []
+        in_frequencies = False
+        for line in self.contents:
+            if line == "Projected MECP frequencies (cm^-1):":
+                in_frequencies = True
+                continue
+            if in_frequencies and not line.strip():
+                break
+            if in_frequencies:
+                frequencies.append(float(line.split(":", 1)[1]))
+
+        self.normal_termination = True
+        self.jobtype = "mecp"
+        self.freq = True
+        self.vibrational_frequencies = frequencies
+        self.energies = [float(values["mecp_energy"])]
+        self.multiplicity_a = int(values["multiplicity_A"])
+        self.multiplicity_b = int(values["multiplicity_B"])
+        # Thermochemistry requires one electronic statistical weight. Keep a
+        # conservative default and allow callers to override it explicitly.
+        self.multiplicity = 1
+        self.rotational_symmetry_number = int(
+            values["rotational_symmetry_number"]
+        )
+        self.molecule = Molecule(
+            symbols=symbols,
+            positions=np.asarray(positions, dtype=float),
+            multiplicity=self.multiplicity,
+            vibrational_frequencies=frequencies,
+        )
+
+
 class Thermochemistry:
     """Class for thermochemistry analysis using SI units.
 
@@ -74,12 +138,14 @@ class Thermochemistry:
         h_freq_cutoff=None,
         energy_units="hartree",
         check_imaginary_frequencies=True,
+        electronic_degeneracy=None,
         rotational_mode="physical",
         **kwargs,
     ):
         self.filename = filename
-        self.program = get_program_type_from_file(self.filename)
-        self.molecule = Molecule.from_filepath(filename)
+        self.program = get_program_type_from_file(filename)
+        self.molecule = self._load_molecule(filename)
+        self.electronic_degeneracy = electronic_degeneracy
         self.energy_units = energy_units
         self.check_imaginary_frequencies = check_imaginary_frequencies
         self.rotational_mode = rotational_mode
@@ -146,6 +212,10 @@ class Thermochemistry:
             if self.v is not None
             else None
         )
+
+    def _load_molecule(self, filename):
+        """Load the molecular data used by the shared thermochemistry formulas."""
+        return Molecule.from_filepath(filename)
 
     @cached_property
     def file_object(self):
@@ -434,6 +504,8 @@ class Thermochemistry:
     @property
     def multiplicity(self):
         """Obtain the multiplicity of the molecule."""
+        if self.electronic_degeneracy is not None:
+            return self.electronic_degeneracy
         return self.file_object.multiplicity
 
     @property
@@ -1526,6 +1598,31 @@ class Thermochemistry:
             out.write(build_row())
 
         logger.info(f"Thermochemistry results saved to {outputfile}")
+
+
+class MECPThermochemistry(Thermochemistry):
+    """Thermochemistry from projected MECP modes using the shared formulas.
+
+    The MECP reader supplies the seam energy, geometry, projected frequencies,
+    and symmetry number. Its default electronic statistical weight is one;
+    callers may override it through ``electronic_degeneracy``.
+    """
+
+    def _load_molecule(self, filename):
+        return self.file_object.molecule
+
+    @cached_property
+    def file_object(self):
+        """Read the dedicated CHEMSMART MECP frequency output."""
+        return MECPProjectedFrequencyOutput(self.filename)
+
+
+def thermochemistry_from_file(filename, **kwargs):
+    """Select the analysis class from file contents, independent of its name."""
+    with open(filename, encoding="utf-8", errors="replace") as stream:
+        is_mecp = stream.readline().strip() == MECPProjectedFrequencyOutput.HEADER
+    analysis_class = MECPThermochemistry if is_mecp else Thermochemistry
+    return analysis_class(filename=filename, **kwargs)
 
 
 class BoltzmannAverageThermochemistry(Thermochemistry):
