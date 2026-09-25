@@ -1,4 +1,5 @@
 import os
+import re
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,6 +8,7 @@ import numpy as np
 import pytest
 
 from chemsmart.analysis.thermochemistry import (
+    MECPProjectedFrequencyOutput,
     MECPThermochemistry,
     Thermochemistry,
     thermochemistry_from_file,
@@ -22,6 +24,20 @@ from chemsmart.jobs.gaussian.settings import (
 )
 from chemsmart.jobs.gaussian.writer import GaussianInputWriter
 from chemsmart.jobs.thermochemistry.job import ThermochemistryJob
+from chemsmart.utils.mixins import FileMixin
+from chemsmart.utils.utils import remove_word_from_parenthesized_option
+
+
+def test_remove_arbitrary_word_from_parenthesized_option():
+    match = re.fullmatch(r"(\w+)=\(([^)]*)\)", "opt=(calcfc,modredundant)")
+
+    assert (
+        remove_word_from_parenthesized_option(match, "calcfc")
+        == "opt=(modredundant)"
+    )
+    assert remove_word_from_parenthesized_option(match, "MODREDUNDANT") == (
+        "opt=(calcfc)"
+    )
 
 
 def test_first_mecp_step_removes_unavailable_guess_read():
@@ -29,16 +45,30 @@ def test_first_mecp_step_removes_unavailable_guess_read():
 
     assert remove_read("scf=xqc guess=read nosymm") == "scf=xqc nosymm"
     assert remove_read("guess=(mix,read) nosymm") == "guess=(mix) nosymm"
+    assert remove_read("guess=(read) nosymm") == "nosymm"
     assert remove_read("scf=xqc nosymm") == "scf=xqc nosymm"
 
 
-def test_mecp_requires_nosymm_for_force_alignment():
+@pytest.mark.parametrize("keyword", ["nosymm", "NoSymm", "nosymmetry"])
+def test_mecp_accepts_disabled_symmetry_keywords(keyword):
     ensure_nosymm = GaussianMECPJob._with_required_nosymm
 
-    assert ensure_nosymm("scf=xqc") == "scf=xqc nosymm"
-    assert ensure_nosymm("NoSymm scf=xqc") == "NoSymm scf=xqc"
+    route = f"{keyword} scf=xqc"
+    assert ensure_nosymm(route) == route
+
+
+@pytest.mark.parametrize("keyword", ["symm", "symmetry", "symmetry=loose"])
+def test_mecp_rejects_enabled_symmetry_keywords(keyword):
+    ensure_nosymm = GaussianMECPJob._with_required_nosymm
+
     with pytest.raises(ValueError, match="requires nosymm"):
-        ensure_nosymm("symmetry=loose")
+        ensure_nosymm(keyword)
+
+
+def test_mecp_adds_nosymm_when_symmetry_is_unspecified():
+    assert GaussianMECPJob._with_required_nosymm("scf=xqc") == (
+        "scf=xqc nosymm"
+    )
 
 
 def test_gaussian_spin_squared_parser_returns_final_values():
@@ -232,6 +262,7 @@ def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
 
     job._write_mecp_frequency_log(result, 1.0e-3)
     frequency_file = tmp_path / "crossing_mecp_freq.log"
+    frequency_output = MECPProjectedFrequencyOutput(str(frequency_file))
     thermochemistry = thermochemistry_from_file(
         str(frequency_file),
         temperature=298.15,
@@ -242,8 +273,14 @@ def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
         jobrunner=object(),
     )
 
+    assert isinstance(frequency_output, FileMixin)
+    assert frequency_output.normal_termination
+    assert frequency_output.freq
+    assert frequency_output.symbols == ["H", "H"]
+    assert frequency_output.vibrational_frequencies == pytest.approx([1234.5])
     assert isinstance(thermochemistry, MECPThermochemistry)
     assert isinstance(thermochemistry, Thermochemistry)
+    assert "_load_molecule" not in MECPThermochemistry.__dict__
     assert thermochemistry.jobtype == "mecp"
     assert thermochemistry.vibrational_frequencies == pytest.approx([1234.5])
     assert thermochemistry.file_object.energies == pytest.approx([-0.99999])
@@ -257,6 +294,35 @@ def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
     contents = frequency_file.read_text(encoding="utf-8")
     assert "n_imaginary=1\n" in contents
     assert "n_significant_imaginary=0\n" in contents
+    assert contents.rstrip().endswith(
+        MECPProjectedFrequencyOutput.TERMINATION_MARKER
+    )
+
+
+def test_mecp_frequency_status_is_determined_from_file_content(tmp_path):
+    frequency_file = tmp_path / "incomplete_mecp_freq.log"
+    frequency_file.write_text(
+        f"{MECPProjectedFrequencyOutput.HEADER}\n",
+        encoding="utf-8",
+    )
+
+    output = MECPProjectedFrequencyOutput(str(frequency_file))
+
+    assert not output.normal_termination
+    assert not output.freq
+    with pytest.raises(ValueError, match="did not terminate normally"):
+        thermochemistry_from_file(str(frequency_file), temperature=298.15)
+
+    frequency_file.write_text(
+        f"{MECPProjectedFrequencyOutput.HEADER}\n"
+        f"{MECPProjectedFrequencyOutput.FREQUENCIES_HEADER}\n"
+        f"{MECPProjectedFrequencyOutput.TERMINATION_MARKER}\n",
+        encoding="utf-8",
+    )
+    output = MECPProjectedFrequencyOutput(str(frequency_file))
+
+    assert output.normal_termination
+    assert output.freq
 
 
 def test_lagrangian_hessian_weight_is_not_forced_to_average():

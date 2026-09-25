@@ -18,6 +18,7 @@ from chemsmart.io.molecules.structure import Molecule
 from chemsmart.jobs.job import Job
 from chemsmart.jobs.runner import JobRunner
 from chemsmart.jobs.thermochemistry.settings import ThermochemistryJobSettings
+from chemsmart.utils.io import file_content_begins_with
 
 logger = logging.getLogger(__name__)
 
@@ -237,10 +238,9 @@ class ThermochemistryJob(Job):
         """
 
         logger.info(f"Reading molecule from file: {filename}")
-        with open(filename, encoding="utf-8", errors="replace") as stream:
-            is_mecp_frequency_file = (
-                stream.readline().strip() == MECPProjectedFrequencyOutput.HEADER
-            )
+        is_mecp_frequency_file = file_content_begins_with(
+            filename, MECPProjectedFrequencyOutput.HEADER
+        )
         if is_mecp_frequency_file:
             molecule = MECPProjectedFrequencyOutput(filename).molecule
         else:

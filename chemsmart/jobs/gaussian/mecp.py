@@ -8,6 +8,7 @@ Minimum Energy Cross Point calculations using Gaussian.
 import logging
 import os
 import re
+from functools import partial
 from typing import Type
 
 import numpy as np
@@ -16,10 +17,13 @@ from ase import units
 from chemsmart.jobs.gaussian.job import GaussianGeneralJob, GaussianJob
 from chemsmart.jobs.gaussian.settings import GaussianMECPJobSettings
 from chemsmart.utils.constants import (
+    MECP_FREQUENCY_HEADER,
+    MECP_FREQUENCY_TERMINATION_MARKER,
     amu_to_kg,
     bohr_to_meter,
     hartree_to_joules,
 )
+from chemsmart.utils.utils import remove_word_from_parenthesized_option
 
 logger = logging.getLogger(__name__)
 
@@ -101,18 +105,9 @@ class GaussianMECPJob(GaussianJob):
     @staticmethod
     def _route_without_guess_read(route):
         """Remove ``read`` from a Gaussian guess option for the first step."""
-
-        def strip_parenthesized_read(match):
-            options = [
-                option.strip()
-                for option in match.group(1).split(",")
-                if option.strip().lower() != "read"
-            ]
-            return f"guess=({','.join(options)})" if options else ""
-
         route = re.sub(
-            r"\bguess\s*=\s*\(([^)]*)\)",
-            strip_parenthesized_read,
+            r"\b(guess)\s*=\s*\(([^)]*)\)",
+            partial(remove_word_from_parenthesized_option, word="read"),
             route,
             flags=re.IGNORECASE,
         )
@@ -123,7 +118,7 @@ class GaussianMECPJob(GaussianJob):
     def _with_required_nosymm(route):
         """Ensure Gaussian forces remain in the MECP Cartesian frame."""
         route = route or ""
-        if re.search(r"\bnosymm\b", route, flags=re.IGNORECASE):
+        if re.search(r"\bnosymm(?:etry)?\b", route, flags=re.IGNORECASE):
             return route
         if re.search(r"\bsymm(?:etry)?\b", route, flags=re.IGNORECASE):
             raise ValueError(
@@ -149,40 +144,6 @@ class GaussianMECPJob(GaussianJob):
             **kwargs,
         )
         self._last_spin_squared = {"A": None, "B": None}
-
-    @staticmethod
-    def _route_without_guess_read(route):
-        """Remove ``read`` from a Gaussian guess option for the first step."""
-
-        def strip_parenthesized_read(match):
-            options = [
-                option.strip()
-                for option in match.group(1).split(",")
-                if option.strip().lower() != "read"
-            ]
-            return f"guess=({','.join(options)})" if options else ""
-
-        route = re.sub(
-            r"\bguess\s*=\s*\(([^)]*)\)",
-            strip_parenthesized_read,
-            route,
-            flags=re.IGNORECASE,
-        )
-        route = re.sub(r"\bguess\s*=\s*read\b", "", route, flags=re.IGNORECASE)
-        return " ".join(route.split())
-
-    @staticmethod
-    def _with_required_nosymm(route):
-        """Ensure Gaussian forces remain in the MECP Cartesian frame."""
-        route = route or ""
-        if re.search(r"\bnosymm\b", route, flags=re.IGNORECASE):
-            return route
-        if re.search(r"\bsymm(?:etry)?\b", route, flags=re.IGNORECASE):
-            raise ValueError(
-                "MECP requires nosymm so Cartesian forces remain aligned with "
-                "the optimization coordinates; remove the explicit symmetry option."
-            )
-        return f"{route} nosymm".strip()
 
     @classmethod
     def settings_class(cls) -> Type[GaussianMECPJobSettings]:
@@ -211,89 +172,6 @@ class GaussianMECPJob(GaussianJob):
         return os.path.join(
             self.optimization_folder, f"{self.label}_traj.xyz"
         )
-
-    @property
-    def state_file(self):
-        return os.path.join(self.folder, f"{self.label}_state.npz")
-
-    @staticmethod
-    def _optional_array(value):
-        return (
-            np.array([], dtype=float) if value is None else np.asarray(value)
-        )
-
-    @staticmethod
-    def _restore_optional_array(value):
-        return None if value.size == 0 else value
-
-    def _save_optimizer_state(self, **state):
-        """Atomically persist enough optimizer state to resume the next step."""
-        temporary_file = f"{self.state_file}.tmp.npz"
-        np.savez(
-            temporary_file,
-            version=np.array(1, dtype=int),
-            symbols=np.asarray(self.molecule.symbols, dtype="U4"),
-            step_size_method=np.array(self.settings.step_size_method),
-            next_step=np.array(state["next_step"], dtype=int),
-            positions_bohr=np.asarray(state["positions_bohr"], dtype=float),
-            current_step_size=np.array(
-                state["current_step_size"], dtype=float
-            ),
-            prev_merit=np.array(
-                np.nan if state["prev_merit"] is None else state["prev_merit"],
-                dtype=float,
-            ),
-            prev_positions=self._optional_array(state["prev_positions"]),
-            prev_proj_grad=self._optional_array(state["prev_proj_grad"]),
-            inv_hessian=self._optional_array(state["inv_hessian"]),
-            prev_eff_grad=self._optional_array(state["prev_eff_grad"]),
-            prev_positions_bfgs=self._optional_array(
-                state["prev_positions_bfgs"]
-            ),
-        )
-        os.replace(temporary_file, self.state_file)
-
-    def _load_optimizer_state(self):
-        """Load and validate a previously persisted optimizer state."""
-        with np.load(self.state_file, allow_pickle=False) as saved:
-            symbols = saved["symbols"].tolist()
-            method = str(saved["step_size_method"])
-            positions = np.asarray(saved["positions_bohr"], dtype=float)
-            if symbols != list(self.molecule.symbols):
-                raise RuntimeError(
-                    "Cannot restart MECP: atom symbols differ from saved state."
-                )
-            if method != self.settings.step_size_method:
-                raise RuntimeError(
-                    "Cannot restart MECP: optimizer method differs from saved state "
-                    f"({method!r} != {self.settings.step_size_method!r})."
-                )
-            if positions.shape != np.asarray(self.molecule.positions).shape:
-                raise RuntimeError(
-                    "Cannot restart MECP: coordinate shape differs from saved state."
-                )
-            prev_merit = float(saved["prev_merit"])
-            return {
-                "next_step": int(saved["next_step"]),
-                "positions_bohr": positions,
-                "current_step_size": float(saved["current_step_size"]),
-                "prev_merit": None if np.isnan(prev_merit) else prev_merit,
-                "prev_positions": self._restore_optional_array(
-                    saved["prev_positions"]
-                ),
-                "prev_proj_grad": self._restore_optional_array(
-                    saved["prev_proj_grad"]
-                ),
-                "inv_hessian": self._restore_optional_array(
-                    saved["inv_hessian"]
-                ),
-                "prev_eff_grad": self._restore_optional_array(
-                    saved["prev_eff_grad"]
-                ),
-                "prev_positions_bfgs": self._restore_optional_array(
-                    saved["prev_positions_bfgs"]
-                ),
-            }
 
     @property
     def state_file(self):
@@ -2109,7 +1987,7 @@ class GaussianMECPJob(GaussianJob):
         masses = np.asarray(result["atomic_masses"], dtype=float)
 
         with open(frequency_file, "w", encoding="utf-8") as output:
-            output.write("CHEMSMART MECP projected frequency analysis\n")
+            output.write(f"{MECP_FREQUENCY_HEADER}\n")
             output.write(f"label={self.label}\n")
             output.write(f"hess_step={h:.6e} Bohr\n")
             output.write(f"energy_A={result['energy_a']:+.12f} Hartree\n")
@@ -2170,6 +2048,8 @@ class GaussianMECPJob(GaussianJob):
                         f"{vector[2]:+14.8f}\n"
                     )
                 output.write("\n")
+
+            output.write(f"{MECP_FREQUENCY_TERMINATION_MARKER}\n")
 
         logger.info(
             f"MECP projected frequencies written to {frequency_file}"

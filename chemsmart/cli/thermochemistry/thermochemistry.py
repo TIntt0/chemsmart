@@ -16,6 +16,7 @@ from chemsmart.jobs.thermochemistry.settings import ThermochemistryJobSettings
 from chemsmart.utils.cli import MyGroup
 from chemsmart.utils.io import (
     check_program_availability_in_chemsmart,
+    file_content_begins_with,
     get_program_type_from_file,
 )
 
@@ -26,11 +27,7 @@ _MECP_FREQUENCY_HEADER = "CHEMSMART MECP projected frequency analysis"
 
 def _is_mecp_projected_frequency_file(filename):
     """Return whether *filename* is a CHEMSMART MECP frequency output."""
-    try:
-        with open(filename, encoding="utf-8", errors="replace") as stream:
-            return stream.readline().strip() == _MECP_FREQUENCY_HEADER
-    except OSError:
-        return False
+    return file_content_begins_with(filename, _MECP_FREQUENCY_HEADER)
 
 
 def thermochemistry_cutoff_options(
@@ -384,8 +381,9 @@ def thermochemistry(
                 "gaussian",
                 "orca",
             }
-            if not supported_program and not _is_mecp_projected_frequency_file(
-                file
+            if (
+                not supported_program
+                and not _is_mecp_projected_frequency_file(file)
             ):
                 raise ValueError(
                     f"Unsupported output file type for '{file}'. Use Gaussian, "

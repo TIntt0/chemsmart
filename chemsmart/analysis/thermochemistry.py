@@ -11,13 +11,19 @@ from chemsmart.io.molecules.structure import Molecule
 from chemsmart.io.orca.output import ORCAOutput
 from chemsmart.io.xtb.output import XTBOutput
 from chemsmart.utils.constants import (
+    MECP_FREQUENCY_HEADER,
+    MECP_FREQUENCY_TERMINATION_MARKER,
     R,
     atm_to_pa,
     energy_conversion,
     hartree_to_joules,
 )
 from chemsmart.utils.geometry import clean_rotational_constants_by_geometry
-from chemsmart.utils.io import get_program_type_from_file
+from chemsmart.utils.io import (
+    file_content_begins_with,
+    get_program_type_from_file,
+)
+from chemsmart.utils.mixins import FileMixin
 from chemsmart.utils.references import (
     grimme_quasi_rrho_entropy_ref,
     head_gordon_damping_function_ref,
@@ -29,29 +35,41 @@ from chemsmart.utils.references import (
 logger = logging.getLogger(__name__)
 
 
-class MECPProjectedFrequencyOutput:
+class MECPProjectedFrequencyOutput(FileMixin):
     """Read a CHEMSMART ``*_mecp_freq.log`` thermochemistry input."""
 
-    HEADER = "CHEMSMART MECP projected frequency analysis"
+    HEADER = MECP_FREQUENCY_HEADER
+    GEOMETRY_HEADER = "Geometry (Angstrom) and masses (amu):"
+    FREQUENCIES_HEADER = "Projected MECP frequencies (cm^-1):"
+    TERMINATION_MARKER = MECP_FREQUENCY_TERMINATION_MARKER
+    jobtype = "mecp"
+    multiplicity = 1
 
     def __init__(self, filename):
         self.filename = filename
-        with open(filename, encoding="utf-8") as stream:
-            self.contents = stream.read().splitlines()
         if not self.contents or self.contents[0].strip() != self.HEADER:
-            raise ValueError(f"Not a CHEMSMART MECP frequency file: {filename}")
+            raise ValueError(
+                f"Not a CHEMSMART MECP frequency file: {filename}"
+            )
 
+    @cached_property
+    def values(self):
+        """Return scalar metadata parsed from the output header."""
         values = {}
         for line in self.contents:
             if "=" in line and not line.startswith("mode "):
                 key, value = line.split("=", 1)
                 values[key.strip()] = value.split()[0]
+        return values
 
+    @cached_property
+    def geometry(self):
+        """Return the atomic symbols and Cartesian positions."""
         symbols = []
         positions = []
         in_geometry = False
         for line in self.contents:
-            if line == "Geometry (Angstrom) and masses (amu):":
+            if line == self.GEOMETRY_HEADER:
                 in_geometry = True
                 continue
             if in_geometry and not line.strip():
@@ -60,36 +78,68 @@ class MECPProjectedFrequencyOutput:
                 fields = line.split()
                 symbols.append(fields[0])
                 positions.append([float(value) for value in fields[1:4]])
+        return symbols, np.asarray(positions, dtype=float)
 
+    @cached_property
+    def symbols(self):
+        return self.geometry[0]
+
+    @cached_property
+    def positions(self):
+        return self.geometry[1]
+
+    @cached_property
+    def vibrational_frequencies(self):
+        """Return the projected MECP frequencies in cm^-1."""
         frequencies = []
         in_frequencies = False
         for line in self.contents:
-            if line == "Projected MECP frequencies (cm^-1):":
+            if line == self.FREQUENCIES_HEADER:
                 in_frequencies = True
                 continue
             if in_frequencies and not line.strip():
                 break
             if in_frequencies:
                 frequencies.append(float(line.split(":", 1)[1]))
+        return frequencies
 
-        self.normal_termination = True
-        self.jobtype = "mecp"
-        self.freq = True
-        self.vibrational_frequencies = frequencies
-        self.energies = [float(values["mecp_energy"])]
-        self.multiplicity_a = int(values["multiplicity_A"])
-        self.multiplicity_b = int(values["multiplicity_B"])
-        # Thermochemistry requires one electronic statistical weight. Keep a
-        # conservative default and allow callers to override it explicitly.
-        self.multiplicity = 1
-        self.rotational_symmetry_number = int(
-            values["rotational_symmetry_number"]
+    @property
+    def normal_termination(self):
+        """Whether the writer reached the explicit completion marker."""
+        return (
+            bool(self.contents)
+            and self.contents[-1] == self.TERMINATION_MARKER
         )
-        self.molecule = Molecule(
-            symbols=symbols,
-            positions=np.asarray(positions, dtype=float),
+
+    @property
+    def freq(self):
+        """Whether the file contains a projected-frequency section."""
+        return self.FREQUENCIES_HEADER in self.contents
+
+    @cached_property
+    def energies(self):
+        return [float(self.values["mecp_energy"])]
+
+    @cached_property
+    def multiplicity_a(self):
+        return int(self.values["multiplicity_A"])
+
+    @cached_property
+    def multiplicity_b(self):
+        return int(self.values["multiplicity_B"])
+
+    @cached_property
+    def rotational_symmetry_number(self):
+        return int(self.values["rotational_symmetry_number"])
+
+    @cached_property
+    def molecule(self):
+        """Build the molecule used by the shared thermochemistry formulas."""
+        return Molecule(
+            symbols=self.symbols,
+            positions=self.positions,
             multiplicity=self.multiplicity,
-            vibrational_frequencies=frequencies,
+            vibrational_frequencies=self.vibrational_frequencies,
         )
 
 
@@ -215,7 +265,7 @@ class Thermochemistry:
 
     def _load_molecule(self, filename):
         """Load the molecular data used by the shared thermochemistry formulas."""
-        return Molecule.from_filepath(filename)
+        return self.file_object.molecule
 
     @cached_property
     def file_object(self):
@@ -1608,19 +1658,28 @@ class MECPThermochemistry(Thermochemistry):
     callers may override it through ``electronic_degeneracy``.
     """
 
-    def _load_molecule(self, filename):
-        return self.file_object.molecule
-
     @cached_property
     def file_object(self):
         """Read the dedicated CHEMSMART MECP frequency output."""
-        return MECPProjectedFrequencyOutput(self.filename)
+        output = MECPProjectedFrequencyOutput(self.filename)
+        if not output.normal_termination:
+            raise ValueError(
+                f"File '{self.filename}' did not terminate normally. "
+                "Skipping thermochemistry calculation for this file."
+            )
+        if not output.freq:
+            raise ValueError(
+                f"File '{self.filename}' does not contain projected "
+                "MECP frequencies."
+            )
+        return output
 
 
 def thermochemistry_from_file(filename, **kwargs):
     """Select the analysis class from file contents, independent of its name."""
-    with open(filename, encoding="utf-8", errors="replace") as stream:
-        is_mecp = stream.readline().strip() == MECPProjectedFrequencyOutput.HEADER
+    is_mecp = file_content_begins_with(
+        filename, MECPProjectedFrequencyOutput.HEADER
+    )
     analysis_class = MECPThermochemistry if is_mecp else Thermochemistry
     return analysis_class(filename=filename, **kwargs)
 
