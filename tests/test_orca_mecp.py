@@ -238,6 +238,54 @@ def test_orca_gap_default_is_independent_of_shared_presets(preset):
     assert mecp_settings(energy_diff_tol=1e-6).energy_diff_tol == 1e-6
 
 
+def test_orca_default_seam_limits_align_with_gaussian_standard():
+    from chemsmart.jobs.gaussian.settings import GaussianMECPJobSettings
+
+    settings = mecp_settings()
+    gaussian = GaussianMECPJobSettings()
+    assert (
+        settings.convergence_preset
+        == gaussian.convergence_preset
+        == "standard"
+    )
+    for name in (
+        "force_max_tol",
+        "force_rms_tol",
+        "disp_max_tol",
+        "disp_rms_tol",
+        "trust_radius",
+    ):
+        assert getattr(settings, name) == getattr(gaussian, name)
+    assert settings.energy_diff_tol == 1e-4
+    assert gaussian.energy_diff_tol == 5e-5
+
+
+def test_orca_follow_branch_tightens_standard_and_preserves_overrides(
+    tmp_path,
+):
+    molecule = Molecule(
+        symbols=["O", "H", "H"],
+        positions=[[0, 0, 0], [1, 0, 0], [0, 1, 0]],
+    )
+    job = ORCAMECPJob(
+        molecule=molecule,
+        settings=mecp_settings(mode="followseam", force_max_tol=1e-4),
+        label="crossing",
+    )
+    branch = job._new_seam_follow_branch(
+        molecule.positions, "branch", str(tmp_path)
+    )
+    assert job.settings.convergence_preset == "standard"
+    assert branch.settings.convergence_preset == "tight"
+    assert branch.settings.force_max_tol == 1e-4
+    assert branch.settings.force_rms_tol == 1e-4
+    assert branch.settings.disp_max_tol == 2e-3
+    assert branch.settings.disp_rms_tol == 1e-3
+    assert branch.settings.trust_radius == 0.1
+    assert branch.settings.energy_diff_tol == 1e-4
+    assert "TightOpt" in branch.settings.route_string
+
+
 @pytest.mark.parametrize(
     "gap,tangent,tolerance",
     [
@@ -1385,6 +1433,7 @@ def test_mecp_shared_workflow_cli(
         1e-5 if "--energy-diff-tol" in args else 1e-4
     )
     assert settings.uses_seam_workflow
+    assert settings.convergence_preset == "standard"
     if args[0] != "numfreq":
         assert "SurfCrossNumFreq" not in settings.route_string
     assert settings.follow_seam_imaginary_mode == (args[0] == "followseam")

@@ -2773,8 +2773,8 @@ class ORCAMECPJobSettings(ORCAJobSettings):
         hess_step_size=1.0e-3,
         max_steps=200,
         step_size=0.1,
-        convergence_preset="tight",
-        # Tight convergence defaults (overridden by preset if not supplied)
+        convergence_preset="standard",
+        # Shared seam-analysis defaults; native SurfCrossOpt uses ORCA settings.
         energy_diff_tol=None,  # Hartree   – None means "use preset"
         force_max_tol=None,  # Hartree/Bohr
         force_rms_tol=None,  # Hartree/Bohr

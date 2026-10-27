@@ -29,14 +29,22 @@ defaults to numerical Hessians; ``--hess-step-size`` (Bohr, default 0.001) contr
 ``--max-steps`` (default 200) limits each inner constrained optimization. ``--maxiter`` controls native ORCA
 optimization iterations separately.
 
-ORCA seam analysis defaults to an absolute state energy gap of at most ``1e-4`` Hartree, matching native
-``SurfCrossOpt`` convergence. This applies both after native optimization and to ``anafreq --only`` and ``numfreq
---only``; no extra tolerance option is needed for a structure optimized with the native default gap. Projected gradient
-checks still apply. To require a stricter gap, use, for example, ``anafreq --only --energy-diff-tol 1e-5`` and supply a
-structure optimized to that accuracy. This option changes the shared analysis threshold, not native optimization
-convergence, and does not infer custom convergence settings from XYZ files. A failed stationarity check reports the
-measured energy gap and projected gradients with their limits before computing Hessians. Gaussian convergence presets
-are unchanged.
+CHEMSMART seam analysis defaults to the ``standard`` preset, as for Gaussian MECP. Its maximum and RMS projected
+gradient limits are ``7e-4`` and ``5e-4`` Hartree/Bohr. These settings control shared analysis and constrained seam
+following, not native ORCA optimization. Native ``TightOpt`` is a separate ORCA setting.
+
+When ``followseam`` creates each branch, it takes the smaller of each current threshold and the corresponding backend
+``tight`` preset value, preserving stricter user settings. This applies before constrained macro steps, branch
+relaxation and verification. ORCA branch defaults are ``3e-4`` and ``1e-4`` Hartree/Bohr for maximum and RMS projected
+gradients, ``2e-3`` and ``1e-3`` Bohr for maximum and RMS displacement, and ``0.1`` Bohr for the trust radius.
+
+Both ORCA presets retain an absolute state energy-gap limit of ``1e-4`` Hartree, matching native ``SurfCrossOpt``
+convergence. This applies both after native optimization and to ``anafreq --only`` and ``numfreq --only``; no extra
+tolerance option is needed for a structure optimized with the native default gap. Projected gradient checks still apply.
+To require a stricter gap, use, for example, ``anafreq --only --energy-diff-tol 1e-5`` and supply a structure optimized
+to that accuracy. This option changes the shared analysis threshold, not native optimization convergence, and does not
+infer custom convergence settings from XYZ files. A failed stationarity check reports the measured energy gap and
+projected gradients with their limits before computing Hessians. Gaussian convergence presets are unchanged.
 
 ``numfreq --only`` also uses the shared driver, computing numerical Hessians at the supplied geometry. Both
 frequency-only modes require a stationary crossing and do not optimize it. They record whether the supplied crossing is
