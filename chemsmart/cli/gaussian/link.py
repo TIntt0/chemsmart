@@ -8,6 +8,7 @@ from chemsmart.cli.gaussian.gaussian import (
     click_gaussian_solvent_options,
     gaussian,
 )
+from chemsmart.cli.gaussian.mecp import MECPCommand
 from chemsmart.cli.gaussian.mecp_options import (
     add_mecp_method_suffix,
     click_mecp_frequency_options,
@@ -17,7 +18,6 @@ from chemsmart.cli.gaussian.mecp_options import (
 )
 from chemsmart.cli.job import click_job_options
 from chemsmart.utils.cli import (
-    MyCommand,
     get_setting_from_jobtype_for_gaussian,
     update_irc_label,
 )
@@ -26,7 +26,7 @@ from chemsmart.utils.utils import check_charge_and_multiplicity
 logger = logging.getLogger(__name__)
 
 
-@gaussian.command("link", cls=MyCommand)
+@gaussian.command("link", cls=MECPCommand)
 @click_job_options
 @click_gaussian_jobtype_options
 @click_gaussian_solvent_options
@@ -180,7 +180,11 @@ def link(
     seam_mode_max_steps,
     **kwargs,
 ):
-    """CLI subcommand for running Gaussian link jobs."""
+    """Run Gaussian link jobs.
+
+    With -j mecp, append numfreq, anafreq or followseam to analyze the
+    optimized crossing or follow an imaginary seam mode.
+    """
 
     # Dispatch to MECP handler when jobtype is 'mecp'
     if jobtype == "mecp":

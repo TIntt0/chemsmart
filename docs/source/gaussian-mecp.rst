@@ -542,6 +542,16 @@ instead of Cartesian finite differences:
 frequency checks, including every initial, macro-step and final followseam check. Numerical is the default.
 ``--hess-step-size`` applies only to numerical Hessians.
 
+Broken-symmetry ``link -j mecp`` accepts the same ``numfreq``, ``anafreq`` and ``followseam`` task tokens, with the same
+Hessian-method conflict checks:
+
+.. code:: bash
+
+   chemsmart sub gaussian -p project -f structure.log -c 0 -m 1 link -j mecp -m1 1 -m2 3 anafreq
+
+The existing ``--mecp-numfreq --hessian-method analytic`` spelling remains supported. The ``--only`` option is available
+on the standalone ``mecp`` command.
+
 Analytic verification runs two reference force jobs followed by two Gaussian ``#p ... freq=analytic`` jobs, keeping the
 reference wavefunctions through their state-specific checkpoints. In broken-symmetry link mode the reference jobs
 perform stability analysis before the separate analytic frequency jobs. The raw Cartesian force constants are read from

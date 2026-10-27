@@ -16,6 +16,7 @@ from chemsmart.analysis.thermochemistry import (
     Thermochemistry,
     thermochemistry_from_file,
 )
+from chemsmart.cli.gaussian.link import link
 from chemsmart.cli.gaussian.mecp import mecp
 from chemsmart.cli.gaussian.mecp_options import add_mecp_method_suffix
 from chemsmart.io.gaussian.output import Gaussian16Output
@@ -1691,6 +1692,42 @@ def test_frequency_method_conflict():
         mecp.make_context("mecp", ["anafreq", "--hessian-method", "numerical"])
 
 
+@pytest.mark.parametrize(
+    "task,method,follow",
+    [
+        ("anafreq", "analytic", False),
+        ("numfreq", "numerical", False),
+        ("followseam", "numerical", True),
+    ],
+)
+def test_link_mecp_task_submission_round_trip(task, method, follow):
+    ctx = link.make_context("link", ["-j", "mecp", task], obj={})
+    assert ctx.params["mecp_numfreq"] is True
+    assert ctx.params["hessian_method"] == method
+    assert ctx.params["follow_seam_imaginary_mode"] is follow
+    _add_subcommand_info_to_ctx(ctx)
+    rebuilt = CtxObjArguments(ctx.obj["subcommand"]).reconstruct_command_line()
+    restored = link.make_context("link", rebuilt[1:])
+    assert restored.params == ctx.params
+
+
+@pytest.mark.parametrize(
+    "args, message",
+    [
+        (
+            ["-j", "mecp", "anafreq", "--hessian-method", "numerical"],
+            "conflicts",
+        ),
+        (["-j", "opt", "anafreq"], "require link"),
+        (["-j", "mecp", "anafreq", "numfreq"], "Choose one"),
+        (["-j", "mecp", "invalid"], "Choose one"),
+    ],
+)
+def test_link_mecp_task_rejects_invalid_arguments(args, message):
+    with pytest.raises(click.UsageError, match=message):
+        link.make_context("link", args)
+
+
 def test_read_real_gaussian_cartesian_hessian():
     path = (
         Path(__file__).parent
@@ -1871,11 +1908,13 @@ def test_route_normalization_removes_parenthesized_keywords(option):
 
 
 @pytest.mark.parametrize("entry", [["mecp"], ["link", "-j", "mecp"]])
+@pytest.mark.parametrize("task", ["anafreq", "numfreq", "followseam"])
 @pytest.mark.parametrize(
     "option", ["--max-follow-steps", "--seam-mode-max-steps"]
 )
 def test_cli_applies_follow_step_limit(
     entry,
+    task,
     option,
     single_molecule_xyz_file,
     gaussian_jobrunner_no_scratch,
@@ -1894,6 +1933,7 @@ def test_cli_applies_follow_step_limit(
             "-m",
             "1",
             *entry,
+            task,
             option,
             "7",
         ],
@@ -1901,6 +1941,11 @@ def test_cli_applies_follow_step_limit(
     )
     assert result.exit_code == 0, result.output
     assert settings.seam_mode_max_steps == 7
+    assert settings.mecp_numfreq is True
+    assert settings.hessian_method == (
+        "analytic" if task == "anafreq" else "numerical"
+    )
+    assert settings.follow_seam_imaginary_mode is (task == "followseam")
 
 
 def test_fresh_numfreq_only_uses_real_state_evaluator(

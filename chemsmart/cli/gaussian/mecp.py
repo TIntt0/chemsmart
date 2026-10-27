@@ -33,6 +33,10 @@ class MECPCommand(MyCommand):
                 "Choose one MECP task: numfreq, anafreq or followseam.", ctx
             )
         if remaining:
+            if "jobtype" in ctx.params and ctx.params["jobtype"] != "mecp":
+                raise click.UsageError(
+                    "MECP tasks require link --jobtype mecp.", ctx
+                )
             task = remaining[0].lower()
             ctx.params["mecp_numfreq"] = True
             if task in {"numfreq", "anafreq"}:
@@ -48,7 +52,7 @@ class MECPCommand(MyCommand):
                 ctx.params["hessian_method"] = method
             if task == "followseam":
                 ctx.params["follow_seam_imaginary_mode"] = True
-        if ctx.params["only"] and (
+        if ctx.params.get("only", False) and (
             not ctx.params["mecp_numfreq"]
             or ctx.params["follow_seam_imaginary_mode"]
         ):
