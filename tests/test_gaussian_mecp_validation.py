@@ -12,6 +12,7 @@ from scipy.constants import Avogadro, Boltzmann, c, h, physical_constants
 
 from chemsmart.analysis.thermochemistry import thermochemistry_from_file
 from chemsmart.jobs.gaussian.mecp import GaussianMECPJob
+from chemsmart.jobs.gaussian.settings import GaussianMECPJobSettings
 
 
 @pytest.mark.parametrize(
@@ -153,6 +154,7 @@ def test_mecp_file_thermal_contributions_match_independent_formulas(
         positions, masses, hessian, diff_grad
     )
     job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(hessian_method="numerical")
     job.folder = str(tmp_path)
     job.label = "reference"
     job.molecule = SimpleNamespace(symbols=["H", "C", "O"])

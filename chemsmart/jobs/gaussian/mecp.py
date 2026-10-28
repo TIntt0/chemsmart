@@ -546,14 +546,10 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
                 f"coordinate shape {np.array(mol.positions).shape}."
             )
         gradient = -forces
-        if not hasattr(self, "_last_spin_squared"):
-            self._last_spin_squared = {"A": None, "B": None}
         self._last_spin_squared[state] = output.spin_squared_after_annihilation
         if os.path.isfile(job.chkfile):
             self._state_checkpoint_files[checkpoint_key] = job.chkfile
         if analytic:
-            if not hasattr(self, "_analytic_hessians"):
-                self._analytic_hessians = {}
             self._analytic_hessians[state] = (
                 self.jobrunner.format_hessian_checkpoint(job)
             )

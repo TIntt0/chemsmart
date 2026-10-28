@@ -307,6 +307,7 @@ def test_linear_thermochemistry_preserves_mecp_mode_count(jobtype):
 
 def test_mecp_frequency_log_is_accepted_by_thermochemistry(tmp_path):
     job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(hessian_method="numerical")
     job.folder = str(tmp_path)
     job.label = "crossing"
     job.molecule = SimpleNamespace(symbols=["H", "H"])
@@ -478,6 +479,7 @@ def test_job_is_complete_requires_post_verification_marker(tmp_path):
 
 def test_mecp_output_paths_follow_functional_layout(tmp_path):
     job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(hessian_method="numerical")
     job.folder = str(tmp_path)
     job.label = "crossing"
 
@@ -537,7 +539,8 @@ def test_state_subjobs_are_routed_by_calculation_phase(tmp_path, monkeypatch):
     job.label = "crossing"
     job.jobrunner = object()
     job.molecule = Molecule()
-    job.settings = SimpleNamespace(
+    job.settings = GaussianMECPJobSettings(
+        hessian_method="numerical",
         charge_a=0,
         charge_b=0,
         multiplicity_a=1,
@@ -546,6 +549,7 @@ def test_state_subjobs_are_routed_by_calculation_phase(tmp_path, monkeypatch):
         title_b="B",
         use_link=False,
     )
+    job._reset_execution_state()
     job.steps_folder = job.optimization_folder
     job._state_checkpoint_files = {}
     job._state_settings = lambda **kwargs: SimpleNamespace(
@@ -1055,6 +1059,7 @@ def test_seam_check_runner_follows_saddle_when_requested():
 
 def test_step_and_seam_logs_include_diagnostics(tmp_path):
     job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(hessian_method="numerical")
     job.folder = str(tmp_path)
     job.label = "crossing"
     report = StringIO()
@@ -1170,6 +1175,7 @@ def test_seam_follow_selects_lower_verified_branch(tmp_path, failed_branch):
             self.settings = settings
             self.label = label
             self.jobrunner = jobrunner
+            self._reset_execution_state()
 
         def _optimize_on_seam_progress_plane(self, positions_bohr, **kwargs):
             return positions_bohr
@@ -1428,6 +1434,7 @@ def test_gaussian_and_orca_share_final_report_format(tmp_path):
         ),
     ):
         job = object.__new__(backend)
+        job._reset_execution_state()
         job.folder = str(tmp_path / backend.PROGRAM)
         Path(job.folder).mkdir()
         job.label = "crossing"
@@ -2002,3 +2009,42 @@ def test_fresh_numfreq_only_uses_real_state_evaluator(
     assert result["is_minimum"]
     assert len(calls) > 2
     assert Path(job.final_report_file).is_file()
+
+
+@pytest.mark.parametrize("backend", ["gaussian", "orca"])
+def test_mecp_execution_state_is_initialized_and_reset(backend):
+    from chemsmart.jobs.orca.mecp import ORCAMECPJob
+    from chemsmart.jobs.orca.settings import ORCAMECPJobSettings
+
+    molecule = Molecule(symbols=["H"], positions=np.zeros((1, 3)))
+    if backend == "gaussian":
+        job = GaussianMECPJob(
+            molecule=molecule,
+            settings=GaussianMECPJobSettings(),
+            label="state",
+        )
+    else:
+        job = ORCAMECPJob(
+            molecule=molecule,
+            settings=ORCAMECPJobSettings(
+                charge=0, multiplicity1=1, multiplicity2=3
+            ),
+            label="state",
+        )
+    expected = {
+        "_state_checkpoint_files": {},
+        "_last_spin_squared": {"A": None, "B": None},
+        "_analytic_hessians": {},
+        "_final_report_context": None,
+        "_final_convergence_metrics": {},
+        "_initial_seam_result": None,
+        "_last_seam_result": None,
+        "_selected_seam_follow_branch": None,
+        "_selected_seam_follow_macro_steps": 0,
+    }
+    for name, value in expected.items():
+        assert getattr(job, name) == value
+        setattr(job, name, "stale previous run")
+    job._reset_execution_state()
+    for name, value in expected.items():
+        assert getattr(job, name) == value

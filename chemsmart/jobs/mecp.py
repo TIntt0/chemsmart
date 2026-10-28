@@ -79,14 +79,13 @@ class MECPSeamMixin:
         """Initialize shared state for optimization and frequency workflows."""
         self._state_checkpoint_files = {}
         self._last_spin_squared = {"A": None, "B": None}
-        for name in (
-            "_final_report_context",
-            "_initial_seam_result",
-            "_last_seam_result",
-            "_selected_seam_follow_branch",
-            "_selected_seam_follow_macro_steps",
-        ):
-            self.__dict__.pop(name, None)
+        self._analytic_hessians = {}
+        self._final_report_context = None
+        self._final_convergence_metrics = {}
+        self._initial_seam_result = None
+        self._last_seam_result = None
+        self._selected_seam_follow_branch = None
+        self._selected_seam_follow_macro_steps = 0
 
     @property
     def optimization_folder(self):
@@ -199,7 +198,7 @@ class MECPSeamMixin:
             or frequency_only
         ):
             raise ValueError("Driver-based reports require initial_steps.")
-        context = getattr(self, "_final_report_context", None)
+        context = self._final_report_context
         if context is not None:
             if energy_gap_tolerance is not None:
                 raise ValueError(
@@ -226,7 +225,7 @@ class MECPSeamMixin:
         result = seam_result or {}
         metrics = result.get(
             "convergence_metrics",
-            getattr(self, "_final_convergence_metrics", {}),
+            self._final_convergence_metrics,
         )
         thresholds = result.get(
             "convergence_thresholds"
@@ -265,10 +264,8 @@ class MECPSeamMixin:
             thresholds=thresholds,
             result=result,
             frequency_only=frequency_only,
-            macro_steps=getattr(self, "_selected_seam_follow_macro_steps", 0),
-            selected_branch=getattr(
-                self, "_selected_seam_follow_branch", None
-            ),
+            macro_steps=self._selected_seam_follow_macro_steps,
+            selected_branch=self._selected_seam_follow_branch,
             state_outputs=outputs,
             legacy_fields=self._final_report_legacy_fields(
                 result, frequency_only
@@ -1133,7 +1130,7 @@ class MECPSeamMixin:
                     suffix,
                     error,
                 )
-            branch_result = getattr(branch, "_last_seam_result", None)
+            branch_result = branch._last_seam_result
             if branch_result is not None and branch_result["is_minimum"]:
                 branch_result["convergence_metrics"] = (
                     branch._final_convergence_metrics

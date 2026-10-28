@@ -178,9 +178,7 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
     def _final_report_legacy_fields(self, result, frequency_only):
         return {
             "energy_gap": f"{result['energy_diff']:+.12e}",
-            "selected_branch": getattr(
-                self, "_selected_seam_follow_branch", "none"
-            ),
+            "selected_branch": self._selected_seam_follow_branch or "none",
         }
 
     def verify_seam_minimum(self, *args, **kwargs):
