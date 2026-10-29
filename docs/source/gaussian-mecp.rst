@@ -747,5 +747,8 @@ identify original engine outputs using paths relative to the report.
 -  ``status=COMPLETED`` after the requested workflow finishes. For frequency-only analysis this indicates completion of
    the analysis; inspect ``seam_minimum`` to distinguish a seam minimum from a saddle.
 
-``gaussian_output_A/B`` remains available as a compatibility alias. The historical ``NUMFREQ ONLY COMPLETED`` marker
-remains for both frequency-only methods.
+Code API: ``final_report_file`` identifies the selected driver workflow result; ``optimization_report_file`` identifies
+the Gaussian optimization progress report. ``verify_seam_minimum()`` returns the ``state_output_files`` mapping.
+
+For compatibility, ``report_file`` aliases ``optimization_report_file``, and ``gaussian_output_files`` aliases
+``state_output_files``. Final reports retain the earlier output aliases and frequency-only completion marker.

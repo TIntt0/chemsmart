@@ -178,6 +178,13 @@ using paths relative to the report.
 -  ``status=COMPLETED`` after the requested workflow finishes. For frequency-only analysis this indicates completion of
    the analysis; inspect ``seam_minimum`` to distinguish a seam minimum from a saddle.
 
-``energy_gap/selected_branch`` remains available as compatibility aliases. Native fields including
-``state_1_energy/state_2_energy`` and the PASSED/WARNING/FAILED assessment are also retained. The historical ``NUMFREQ
-ONLY COMPLETED`` marker remains for both frequency-only methods.
+Native fields including ``state_1_energy/state_2_energy`` and the PASSED/WARNING/FAILED assessment describe the native
+quality report.
+
+Code API: ``final_report_file`` identifies the selected shared seam-workflow result. For native-only calculations,
+``native_quality_report_file`` identifies the native quality report. The native quality report describes the initial
+ORCA calculation, which may differ from the selected result after seam following. ``verify_seam_minimum()`` returns the
+canonical ``state_output_files`` mapping.
+
+For compatibility, ``report_file`` aliases ``native_quality_report_file``, ``seam_report_file`` aliases
+``final_report_file``, and shared reports retain the earlier energy-gap, branch and frequency-only completion aliases.

@@ -97,6 +97,10 @@ class MECPSeamMixin:
 
     @property
     def final_report_file(self):
+        """Path to the shared report for the selected driver workflow result.
+
+        Native-only ORCA runs instead produce ``native_quality_report_file``.
+        """
         return self.mecp_files.final_report
 
     @property

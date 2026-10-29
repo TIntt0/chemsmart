@@ -140,9 +140,7 @@ def write_final_report(
 ):
     """Write one final-result schema for optimization and frequency-only jobs.
 
-    Missing native convergence metrics are recorded as NA. Legacy fields
-    preserve existing consumers without giving the canonical fields different
-    meanings between backends.
+    Missing native convergence metrics are recorded as NA.
     """
     result = result or {}
     checked = "is_minimum" in result
@@ -202,7 +200,6 @@ def write_final_report(
             output.write("\nProjected MECP frequencies (cm^-1):\n")
             for index, frequency in enumerate(result["frequencies"], 1):
                 output.write(f"mode {index:4d}: {frequency:+14.6f}\n")
-        # Retain the existing Gaussian frequency-only completion marker.
         if frequency_only:
             output.write("NUMFREQ ONLY COMPLETED\n")
         output.write("status=COMPLETED\n")

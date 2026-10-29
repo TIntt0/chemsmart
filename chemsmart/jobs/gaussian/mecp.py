@@ -16,7 +16,7 @@ from typing import Type
 import numpy as np
 from ase import units
 
-from chemsmart.io.mecp import read_report_fields, state_job_label
+from chemsmart.io.mecp import read_report_fields
 from chemsmart.jobs.gaussian.job import GaussianGeneralJob, GaussianJob
 from chemsmart.jobs.gaussian.settings import (
     GaussianJobSettings,
@@ -156,10 +156,16 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
         return GaussianMECPJobSettings
 
     @property
-    def report_file(self):
+    def optimization_report_file(self):
+        """Path to the Gaussian driver optimization progress report."""
         return os.path.join(
             self.optimization_folder, f"{self.label}_report.log"
         )
+
+    @property
+    def report_file(self):
+        """Compatibility alias for the optimization progress report."""
+        return self.optimization_report_file
 
     @property
     def final_gaussian_logs(self):
@@ -292,8 +298,14 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
         if self.settings.mecp_numfreq_only:
             if not os.path.isfile(self.final_report_file):
                 return False
-            with open(self.final_report_file, encoding="utf-8") as report:
-                complete = "NUMFREQ ONLY COMPLETED" in report.read()
+            report = read_report_fields(self.final_report_file)
+            complete = (
+                report.get("status") == "COMPLETED"
+                and report.get("optimization") == "SKIPPED"
+            )
+            if not complete and not report.get("status"):
+                with open(self.final_report_file, encoding="utf-8") as saved:
+                    complete = "NUMFREQ ONLY COMPLETED" in saved.read()
             return complete and all(
                 os.path.isfile(path)
                 for path in (
@@ -304,9 +316,9 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
                     ),
                 )
             )
-        if not os.path.isfile(self.report_file):
+        if not os.path.isfile(self.optimization_report_file):
             return False
-        with open(self.report_file, encoding="utf-8") as f:
+        with open(self.optimization_report_file, encoding="utf-8") as f:
             converged = any(line.startswith("Converged at step") for line in f)
         if not converged:
             return False
@@ -323,7 +335,7 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
             )
         return True
 
-    def _state_settings(self, charge, multiplicity, title, state="A"):
+    def _build_state_settings(self, charge, multiplicity, title, state="A"):
         """
         Build per-state calculation settings.
 
@@ -440,37 +452,34 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
         )
         return settings
 
-    def _run_state(
+    def _state_settings(self, state, analytic, step_idx):
+        """Prepare settings for a single state and calculation type."""
+        suffix = state.lower()
+        settings = self._build_state_settings(
+            charge=getattr(self.settings, f"charge_{suffix}"),
+            multiplicity=getattr(self.settings, f"multiplicity_{suffix}"),
+            title=f"{getattr(self.settings, f'title_{suffix}')} step {step_idx}",
+            state=state,
+        )
+        return (
+            self._analytic_state_settings(settings) if analytic else settings
+        )
+
+    def _state_job(
         self,
         positions_bohr,
         step_idx,
         state,
-        checkpoint_tag=None,
-        analytic=False,
+        checkpoint_tag,
+        settings,
+        analytic,
     ):
-        if state == "A":
-            charge = self.settings.charge_a
-            multiplicity = self.settings.multiplicity_a
-            title = self.settings.title_a
-        else:
-            charge = self.settings.charge_b
-            multiplicity = self.settings.multiplicity_b
-            title = self.settings.title_b
-
+        """Prepare a Gaussian state job and its checkpoint."""
         mol = self.molecule.copy()
-        mol.positions = positions_bohr * units.Bohr
-        settings = self._state_settings(
-            charge=charge,
-            multiplicity=multiplicity,
-            title=f"{title} step {step_idx}",
-            state=state,
+        mol.positions = np.asarray(positions_bohr) * units.Bohr
+        state_label = self.mecp_files.state_label(
+            step_idx, state, checkpoint_tag
         )
-        if analytic:
-            settings = self._analytic_state_settings(settings)
-        state_label = state_job_label(
-            self.label, step_idx, state, checkpoint_tag
-        )
-
         checkpoint_key = (checkpoint_tag, state)
         oldchkfile = self._state_checkpoint_files.get(checkpoint_key)
         if analytic and (not oldchkfile or not os.path.isfile(oldchkfile)):
@@ -524,31 +533,47 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
         job_folder = (
             self.frequency_type_folder
             if checkpoint_tag == "check"
-            else self.steps_folder
+            else self.optimization_folder
         )
         os.makedirs(job_folder, exist_ok=True)
         job.set_folder(job_folder)
         job.oldchkfile = oldchkfile
+        return job
+
+    def _run_state(
+        self,
+        positions_bohr,
+        step_idx,
+        state,
+        checkpoint_tag=None,
+        analytic=False,
+    ):
+        settings = self._state_settings(
+            state=state, analytic=analytic, step_idx=step_idx
+        )
+        job = self._state_job(
+            positions_bohr, step_idx, state, checkpoint_tag, settings, analytic
+        )
         job.run()
         output = job._output()
         if output is None or output.energies is None or not output.energies:
-            raise RuntimeError(f"Failed to parse energy for {state_label}.")
+            raise RuntimeError(f"Failed to parse energy for {job.label}.")
         if output.forces is None or len(output.forces) == 0:
             raise RuntimeError(
-                f"Failed to parse forces for {state_label}. "
+                f"Failed to parse forces for {job.label}. "
                 "MECP requires `force` calculations."
             )
         energy = output.energies[-1]
         forces = np.array(output.forces[-1], dtype=float)
-        if forces.shape != np.array(mol.positions).shape:
+        if forces.shape != np.array(self.molecule.positions).shape:
             raise RuntimeError(
                 f"Parsed force shape {forces.shape} does not match "
-                f"coordinate shape {np.array(mol.positions).shape}."
+                f"coordinate shape {np.array(self.molecule.positions).shape}."
             )
         gradient = -forces
         self._last_spin_squared[state] = output.spin_squared_after_annihilation
         if os.path.isfile(job.chkfile):
-            self._state_checkpoint_files[checkpoint_key] = job.chkfile
+            self._state_checkpoint_files[(checkpoint_tag, state)] = job.chkfile
         if analytic:
             self._analytic_hessians[state] = (
                 self.jobrunner.format_hessian_checkpoint(job)
@@ -859,7 +884,7 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
     def _run(self, **kwargs):
         self._reset_execution_state()
         if self.settings.mecp_numfreq_only:
-            return self._run_numfreq_only()
+            return self._run_frequency_only()
         positions_bohr = (
             np.array(self.molecule.positions, dtype=float) / units.Bohr
         )
@@ -903,7 +928,7 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
 
         report_mode = "a" if restarting else "w"
         converged_step = None
-        with open(self.report_file, report_mode) as report:
+        with open(self.optimization_report_file, report_mode) as report:
             if restarting:
                 report.write(
                     f"Restarting from saved state at step {start_step}.\n"
@@ -1066,7 +1091,9 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
             try:
                 seam_result = self._run_seam_minimum_check(positions_bohr)
             except Exception as error:
-                with open(self.report_file, "a", encoding="utf-8") as report:
+                with open(
+                    self.optimization_report_file, "a", encoding="utf-8"
+                ) as report:
                     report.write(
                         f"Initial MECP optimization converged at step "
                         f"{converged_step}.\n"
@@ -1077,7 +1104,7 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
 
         if not self.is_seam_follow_branch:
             sources = (
-                seam_result["gaussian_output_files"]
+                seam_result["state_output_files"]
                 if seam_result is not None
                 else {
                     state: os.path.join(
@@ -1089,7 +1116,9 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
             )
             self._export_final_gaussian_logs(sources)
 
-        with open(self.report_file, "a", encoding="utf-8") as report:
+        with open(
+            self.optimization_report_file, "a", encoding="utf-8"
+        ) as report:
             report.write(
                 f"Initial MECP optimization converged at step "
                 f"{converged_step}.\n"
@@ -1138,10 +1167,6 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
         if os.path.isfile(self.state_file):
             os.remove(self.state_file)
 
-    def _run_numfreq_only(self):
-        """Analyze the supplied stationary crossing without changing geometry."""
-        return self._run_frequency_only()
-
     # ------------------------------------------------------------------
     # Seam-minimum verification via effective Hessian analysis
     # ------------------------------------------------------------------
@@ -1156,14 +1181,13 @@ class GaussianMECPJob(MECPSeamMixin, GaussianJob):
             if checkpoint_file and os.path.isfile(checkpoint_file):
                 os.remove(checkpoint_file)
 
-    def verify_seam_minimum(self, *args, **kwargs):
-        result = super().verify_seam_minimum(*args, **kwargs)
-        # Preserve the Gaussian result API used by existing export consumers.
-        result["gaussian_output_files"] = result["state_output_files"]
-        return result
-
     def _final_report_outputs(self, result):
         return self.final_gaussian_logs
+
+    def verify_seam_minimum(self, *args, **kwargs):
+        result = super().verify_seam_minimum(*args, **kwargs)
+        result["gaussian_output_files"] = result["state_output_files"]
+        return result
 
     def _final_report_legacy_fields(self, result, frequency_only):
         if frequency_only:

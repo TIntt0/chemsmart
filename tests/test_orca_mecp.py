@@ -846,6 +846,7 @@ def test_orca_mecp_quality_report(
     shutil.copy(source, job.outputfile)
 
     report_path = job.log_results(energy_gap_tolerance=2.0e-4)
+    assert report_path == job.native_quality_report_file
     report = Path(report_path).read_text(encoding="utf-8")
 
     assert Path(report_path).name == "ch3o_ch2oh_mecp_report.log"
@@ -1455,3 +1456,11 @@ def test_mecp_positional_mode_command_reconstruction():
     assert "--mode-argument" not in arguments
     with mecp.make_context("mecp", arguments[1:]) as ctx:
         assert ctx.params["mode_argument"] == "numfreq"
+
+
+def test_legacy_report_path_aliases(tmp_path):
+    job = object.__new__(ORCAMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    assert job.report_file == job.native_quality_report_file
+    assert job.seam_report_file == job.final_report_file

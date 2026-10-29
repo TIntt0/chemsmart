@@ -467,7 +467,7 @@ def test_job_is_complete_requires_post_verification_marker(tmp_path):
     job.settings = GaussianMECPJobSettings()
     job.folder = str(tmp_path)
     job.label = "verified"
-    report = Path(job.report_file)
+    report = Path(job.optimization_report_file)
     report.parent.mkdir()
     report.write_text("Optimization converged at step 8.\n", encoding="utf-8")
 
@@ -486,7 +486,7 @@ def test_mecp_output_paths_follow_functional_layout(tmp_path):
     assert (
         Path(job.final_report_file) == tmp_path / "crossing_final_report.log"
     )
-    assert Path(job.report_file) == (
+    assert Path(job.optimization_report_file) == (
         tmp_path / "crossing_optimization" / "crossing_report.log"
     )
     assert Path(job.trajectory_file) == (
@@ -581,7 +581,7 @@ def test_completed_mecp_requires_requested_frequency_outputs(tmp_path):
     job.folder = str(tmp_path)
     job.label = "crossing"
     Path(job.optimization_folder).mkdir()
-    Path(job.report_file).write_text("Converged at step 3.\n")
+    Path(job.optimization_report_file).write_text("Converged at step 3.\n")
     assert not job._job_is_complete()
     Path(job.frequency_type_folder).mkdir()
     (Path(job.frequency_type_folder) / "crossing_seam_check.log").write_text(
@@ -803,7 +803,7 @@ def test_state_settings_build_force_jobs_with_nosymm(use_link):
         guess="mix",
     )
 
-    state_settings = job._state_settings(1, 2, "state A")
+    state_settings = job._build_state_settings(1, 2, "state A")
 
     expected_type = (
         GaussianLinkJobSettings if use_link else GaussianJobSettings
@@ -1145,7 +1145,7 @@ def test_mecp_driver_writes_final_marker_on_convergence(tmp_path):
     for state, path in job.final_gaussian_logs.items():
         assert Path(path).read_text() == f"converged state {state}"
     assert job.molecule.positions == pytest.approx(np.zeros((1, 3)))
-    report = Path(job.report_file).read_text()
+    report = Path(job.optimization_report_file).read_text()
     assert "Optimization converged at step 1." in report
     assert report.endswith("Converged at step 1.\n")
     assert Path(job.trajectory_file).is_file()
@@ -1201,7 +1201,7 @@ def test_seam_follow_selects_lower_verified_branch(tmp_path, failed_branch):
                 )
                 outputs[state] = str(path)
             self._last_seam_result = {
-                "gaussian_output_files": outputs,
+                "state_output_files": outputs,
                 "is_minimum": True,
                 "mecp_energy": energy,
                 "positions_angstrom": self.molecule.positions.copy(),
@@ -1230,7 +1230,7 @@ def test_seam_follow_selects_lower_verified_branch(tmp_path, failed_branch):
     }
 
     selected = job._follow_seam_imaginary_mode(initial)
-    job._export_final_gaussian_logs(selected["gaussian_output_files"])
+    job._export_final_gaussian_logs(selected["state_output_files"])
     for state, path in job.final_gaussian_logs.items():
         assert (
             Path(path).read_text()
@@ -1287,7 +1287,7 @@ def test_intermediate_follow_branch_has_no_final_summary(tmp_path):
 
     job._run()
 
-    assert Path(job.report_file).is_file()
+    assert Path(job.optimization_report_file).is_file()
     assert not Path(job.final_report_file).exists()
 
 
@@ -1309,7 +1309,7 @@ def test_mecp_report_distinguishes_initial_saddle_and_final_minimum(tmp_path):
         "frequencies": np.array([-38.7, 250.0]),
     }
     final = {
-        "gaussian_output_files": {
+        "state_output_files": {
             "A": "selected_A.log",
             "B": "selected_B.log",
         },
@@ -1331,7 +1331,7 @@ def test_mecp_report_distinguishes_initial_saddle_and_final_minimum(tmp_path):
     job._run_seam_minimum_check = verify
     job._run()
 
-    report = Path(job.report_file).read_text(encoding="utf-8")
+    report = Path(job.optimization_report_file).read_text(encoding="utf-8")
     assert "Initial MECP optimization converged at step 1." in report
     assert "Initial seam status: SADDLE" in report
     assert "Initial lowest projected frequency=-38.700000 cm^-1" in report
@@ -1505,7 +1505,7 @@ def test_mecp_report_records_failed_seam_verification(tmp_path):
     with pytest.raises(RuntimeError, match="No verified seam minimum"):
         job._run()
 
-    report = Path(job.report_file).read_text(encoding="utf-8")
+    report = Path(job.optimization_report_file).read_text(encoding="utf-8")
     assert "Final status: FAILED SEAM VERIFICATION" in report
     assert "Converged at step 1.\n" not in report
 
@@ -2048,3 +2048,39 @@ def test_mecp_execution_state_is_initialized_and_reset(backend):
     job._reset_execution_state()
     for name, value in expected.items():
         assert getattr(job, name) == value
+
+
+def test_legacy_frequency_report_requires_outputs_and_no_failed_status(
+    tmp_path,
+):
+    job = object.__new__(GaussianMECPJob)
+    job.settings = GaussianMECPJobSettings(mecp_numfreq_only=True)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    report = Path(job.final_report_file)
+    report.write_text("NUMFREQ ONLY COMPLETED\n")
+    assert not job._job_is_complete()
+    Path(job.frequency_type_folder).mkdir()
+    (Path(job.frequency_type_folder) / "crossing_seam_check.log").write_text(
+        "checked\n"
+    )
+    Path(job.frequency_file).write_text("hessian_method=numerical\n")
+    assert job._job_is_complete()
+    report.write_text("NUMFREQ ONLY COMPLETED\nstatus=FAILED\n")
+    assert not job._job_is_complete()
+
+
+def test_legacy_gaussian_result_and_report_aliases(tmp_path, monkeypatch):
+    from chemsmart.jobs.mecp import MECPSeamMixin
+
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "crossing"
+    outputs = {"A": "a.log", "B": "b.log"}
+    monkeypatch.setattr(
+        MECPSeamMixin,
+        "verify_seam_minimum",
+        lambda self: {"state_output_files": outputs},
+    )
+    assert job.verify_seam_minimum()["gaussian_output_files"] == outputs
+    assert job.report_file == job.optimization_report_file

@@ -110,6 +110,7 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
 
     @property
     def seam_report_file(self):
+        """Compatibility alias for the shared seam report."""
         return self.final_report_file
 
     def _job_is_complete(self):
@@ -137,8 +138,8 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
             return
         self._reset_execution_state()
         # Remove an earlier success marker before starting a fresh workflow.
-        if os.path.isfile(self.seam_report_file):
-            os.remove(self.seam_report_file)
+        if os.path.isfile(self.final_report_file):
+            os.remove(self.final_report_file)
         if self.settings.mecp_numfreq_only:
             self._run_frequency_only()
             return
@@ -174,12 +175,6 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
             raise RuntimeError("ORCA final MECP structure is missing")
         self.molecule.positions = native.final_structure.positions.copy()
         self._final_optimization_steps = len(native.energy_gap_history)
-
-    def _final_report_legacy_fields(self, result, frequency_only):
-        return {
-            "energy_gap": f"{result['energy_diff']:+.12e}",
-            "selected_branch": self._selected_seam_follow_branch or "none",
-        }
 
     def verify_seam_minimum(self, *args, **kwargs):
         # Native convergence alone is not sufficient for projected analysis.
@@ -312,7 +307,9 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
     ):
         from chemsmart.io.orca.hessian import ORCAHessianFile
 
-        settings = self._state_settings(state, checkpoint_tag, analytic)
+        settings = self._state_settings(
+            state=state, checkpoint_tag=checkpoint_tag, analytic=analytic
+        )
         job = self._state_job(
             positions_bohr, step_idx, state, checkpoint_tag, settings
         )
@@ -440,9 +437,20 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
             )
 
     @property
-    def report_file(self):
-        """Path to the concise, user-facing MECP quality report."""
+    def native_quality_report_file(self):
+        """Path to the quality report for the initial native ORCA calculation."""
         return os.path.join(self.folder, f"{self.label}_report.log")
+
+    @property
+    def report_file(self):
+        """Compatibility alias for the native quality report."""
+        return self.native_quality_report_file
+
+    def _final_report_legacy_fields(self, result, frequency_only):
+        return {
+            "energy_gap": f"{result['energy_diff']:+.12e}",
+            "selected_branch": self._selected_seam_follow_branch or "none",
+        }
 
     def _log_native_results(self, energy_gap_tolerance=None):
         """Write a concise quality report for a completed ORCA MECP job.
@@ -556,10 +564,14 @@ class ORCAMECPJob(MECPSeamMixin, ORCAJob):
                 for surface, path in self.native_frequency_files.items()
             )
 
-        with open(self.report_file, "w", encoding="utf-8") as report:
+        with open(
+            self.native_quality_report_file, "w", encoding="utf-8"
+        ) as report:
             report.write("\n".join(lines))
-        logger.info(f"Wrote ORCA MECP quality report: {self.report_file}")
-        return self.report_file
+        logger.info(
+            f"Wrote ORCA MECP quality report: {self.native_quality_report_file}"
+        )
+        return self.native_quality_report_file
 
     @property
     def results(self):
