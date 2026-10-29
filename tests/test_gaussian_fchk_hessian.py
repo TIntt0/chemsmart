@@ -102,6 +102,7 @@ def test_conversion_uses_environment_and_never_reuses_old_output(
 
 def test_missing_reference_checkpoint_prevents_analytic_job(tmp_path):
     job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
     job.settings = GaussianMECPJobSettings(functional="b3lyp", basis="6-31g")
     job.molecule = Molecule(symbols=["H"], positions=np.zeros((1, 3)))
     job.label = "test"

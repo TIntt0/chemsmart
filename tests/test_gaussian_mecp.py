@@ -2084,3 +2084,36 @@ def test_legacy_gaussian_result_and_report_aliases(tmp_path, monkeypatch):
     )
     assert job.verify_seam_minimum()["gaussian_output_files"] == outputs
     assert job.report_file == job.optimization_report_file
+
+
+def test_frequency_only_analyzes_known_stationary_crossing(tmp_path):
+    from ase import units
+
+    from tests.test_mecp_shared_validation import _known_spectrum_model
+
+    positions, masses, hessian, diff_grad, expected, _ = (
+        _known_spectrum_model()
+    )
+    job = object.__new__(GaussianMECPJob)
+    job.folder = str(tmp_path)
+    job.label = "known"
+    job.settings = GaussianMECPJobSettings(
+        mecp_numfreq_only=True, multiplicity_a=3, multiplicity_b=1
+    )
+    job.molecule = SimpleNamespace(
+        positions=positions * units.Bohr,
+        most_abundant_masses=masses,
+        symbols=["H", "C", "O"],
+    )
+    initial = job.molecule.positions.copy()
+    job._state_checkpoint_files = {}
+    job._run_state = lambda positions, step, state, **kwargs: (
+        0.0,
+        0.5 * diff_grad if state == "A" else -0.5 * diff_grad,
+    )
+    job._compute_numerical_hessian = lambda *args, **kwargs: (hessian, hessian)
+    result = job._run()
+    np.testing.assert_allclose(result["frequency_eigenvalues"], expected)
+    np.testing.assert_array_equal(job.molecule.positions, initial)
+    assert job._job_is_complete()
+    assert not (tmp_path / "known_optimization").exists()
