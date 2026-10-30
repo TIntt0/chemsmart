@@ -90,6 +90,10 @@ def sub(
         create_logger(stream=True, debug=True)
     else:
         create_logger(debug=debug, stream=stream)
+    if max_parallel is not None and not (verbose or debug):
+        logging.getLogger().setLevel(logging.WARNING)
+        if stream:
+            click.echo("Preparing xTB jobs...")
     logger.info("Entering main program")
 
     # Resolve one shared Server instance for both JobRunner and Submitter.
@@ -374,7 +378,12 @@ def process_pipeline(ctx, *args, **kwargs):  # noqa: PLR0915
 
         cli_args = _reconstruct_cli_args(ctx, job[0])
         submit_limited_xtb_jobs(
-            jobrunner, job, indices, cli_args, max_parallel
+            jobrunner,
+            job,
+            indices,
+            cli_args,
+            max_parallel,
+            show_progress=kwargs.get("stream", True),
         )
         return
 
@@ -426,7 +435,13 @@ def _xtb_single_args(cli_args, index, label, source_xyz=None):
 
 
 def submit_limited_xtb_jobs(
-    jobrunner, jobs, indices, cli_args, limit, poll_interval=30
+    jobrunner,
+    jobs,
+    indices,
+    cli_args,
+    limit,
+    poll_interval=30,
+    show_progress=False,
 ):
     """Submit at most limit Slurm jobs, replenishing as jobs leave the queue.
 
@@ -435,9 +450,12 @@ def submit_limited_xtb_jobs(
     """
     active = set()
     server = jobrunner.server
+    submitted = 0
+    skipped = 0
     for job, index in zip(jobs, indices):
         job.jobrunner = jobrunner
         if job.skip_completed and job.is_complete():
+            skipped += 1
             continue
         while len(active) >= limit:
             result = subprocess.run(
@@ -474,7 +492,16 @@ def submit_limited_xtb_jobs(
         if not job_id.isdecimal():
             raise RuntimeError(f"Unexpected sbatch output: {result.stdout!r}")
         active.add(job_id)
+        submitted += 1
         logger.info("Submitted structure %s as Slurm job %s", index, job_id)
+        if show_progress and (submitted == 1 or submitted % 100 == 0):
+            click.echo(
+                f"Submitted {submitted}/{len(jobs)} jobs; skipped {skipped} completed."
+            )
+    if show_progress:
+        click.echo(
+            f"Submission finished: {submitted} submitted, {skipped} skipped."
+        )
 
 
 for subcommand in subcommands:
