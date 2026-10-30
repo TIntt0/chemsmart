@@ -5,7 +5,11 @@ This module provides command-line interface for submitting jobs to
 various queuing systems and cluster schedulers.
 """
 
+import getpass
 import logging
+import os
+import subprocess
+import time
 
 import click
 
@@ -49,6 +53,13 @@ logger = logging.getLogger(__name__)
     default=False,
     help="Print the generated command.",
 )
+@click.option(
+    "--max-parallel",
+    type=click.IntRange(min=1),
+    default=None,
+    help="For xTB on Slurm, keep at most this many jobs queued or running. "
+    "The submission process must remain running.",
+)
 def sub(
     ctx,
     server,
@@ -65,6 +76,7 @@ def sub(
     verbose,
     test,
     print_command,
+    max_parallel,
     **kwargs,
 ):
     """
@@ -111,6 +123,7 @@ def sub(
     # Store the jobrunner and other options in the context object
     ctx.ensure_object(dict)  # Ensure ctx.obj is initialized as a dict
     ctx.obj["jobrunner"] = jobrunner
+    ctx.obj["max_parallel"] = max_parallel
 
 
 @sub.result_callback(replace=True)
@@ -150,6 +163,7 @@ def process_pipeline(ctx, *args, **kwargs):  # noqa: PLR0915
                 "verbose",
                 "test",
                 "print_command",
+                "max_parallel",
             ]
 
             for keyword in keywords_not_in_run:
@@ -334,6 +348,36 @@ def process_pipeline(ctx, *args, **kwargs):  # noqa: PLR0915
     jobrunner = ctx.obj["jobrunner"]
     job = args[0]
 
+    max_parallel = ctx.obj.get("max_parallel")
+    if max_parallel is not None:
+        if jobrunner.server.scheduler != "SLURM":
+            raise click.UsageError("--max-parallel requires a Slurm server")
+        if not (ctx.obj.get("filename") or "").lower().endswith(".npz"):
+            raise click.UsageError(
+                "--max-parallel currently requires an NPZ input"
+            )
+        if not isinstance(job, list) or not all(
+            j.PROGRAM == "xtb" for j in job
+        ):
+            raise click.UsageError(
+                "--max-parallel requires multiple xTB structures selected with -i"
+            )
+        indices = ctx.obj.get("molecule_indices")
+        if indices is None or len(indices) != len(job):
+            raise click.UsageError(
+                "A separate structure index is required for each xTB job"
+            )
+        if kwargs.get("test"):
+            raise click.UsageError(
+                "--test cannot be combined with --max-parallel"
+            )
+
+        cli_args = _reconstruct_cli_args(ctx, job[0])
+        submit_limited_xtb_jobs(
+            jobrunner, job, indices, cli_args, max_parallel
+        )
+        return
+
     # Handle list of jobs (when multiple molecules are specified with --index)
     if isinstance(job, list):
         logger.info(f"Processing {len(job)} jobs")
@@ -343,6 +387,94 @@ def process_pipeline(ctx, *args, **kwargs):  # noqa: PLR0915
     else:
         job.jobrunner = jobrunner
         _process_single_job(job=job)
+
+
+def _xtb_single_args(cli_args, index, label, source_xyz=None):
+    """Build a run invocation selecting and naming exactly one structure."""
+    args = list(cli_args)
+    pos = args.index("xtb") + 1
+    end = next(
+        (i for i in range(pos, len(args)) if args[i] in {"opt", "sp", "hess"}),
+        len(args),
+    )
+    section = args[pos:end]
+    for option in (
+        "--index",
+        "-i",
+        "--structure-index",
+        "--si",
+        "--label",
+        "-l",
+        "--append-label",
+        "-a",
+    ):
+        while option in section:
+            i = section.index(option)
+            del section[i : i + 2]
+    if source_xyz is not None:
+        for option in ("--filename", "-f"):
+            if option in section:
+                section[section.index(option) + 1] = source_xyz
+                break
+        else:
+            raise ValueError("Expected an xTB input filename")
+        selection = []
+    else:
+        selection = ["--index", str(index)]
+    args[pos:end] = section + selection + ["--label", label]
+    return args
+
+
+def submit_limited_xtb_jobs(
+    jobrunner, jobs, indices, cli_args, limit, poll_interval=30
+):
+    """Submit at most limit Slurm jobs, replenishing as jobs leave the queue.
+
+    The controller runs in the foreground; scheduler query and submission
+    failures stop it rather than risking exceeding the limit.
+    """
+    active = set()
+    server = jobrunner.server
+    for job, index in zip(jobs, indices):
+        job.jobrunner = jobrunner
+        if job.skip_completed and job.is_complete():
+            continue
+        while len(active) >= limit:
+            result = subprocess.run(
+                [
+                    "squeue",
+                    "--noheader",
+                    "--user",
+                    getpass.getuser(),
+                    "--format=%i",
+                ],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            active.intersection_update(result.stdout.split())
+            if len(active) >= limit:
+                time.sleep(poll_interval)
+        server._check_running_jobs(job)
+        # Materialize the already-read geometry once. Each compute job reads
+        # its own small input instead of reopening the entire NPZ archive.
+        source_xyz = os.path.join(job.folder, f"{job.label}.source.xyz")
+        job.molecule.write_xyz(source_xyz, mode="w")
+        server._write_submission_script(
+            job, _xtb_single_args(cli_args, index, job.label, source_xyz)
+        )
+        submitter = server.get_submitter(job)
+        result = subprocess.run(
+            ["sbatch", "--parsable", submitter.submit_script],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        job_id = result.stdout.strip().split(";", 1)[0]
+        if not job_id.isdecimal():
+            raise RuntimeError(f"Unexpected sbatch output: {result.stdout!r}")
+        active.add(job_id)
+        logger.info("Submitted structure %s as Slurm job %s", index, job_id)
 
 
 for subcommand in subcommands:
