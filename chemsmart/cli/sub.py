@@ -6,6 +6,7 @@ various queuing systems and cluster schedulers.
 """
 
 import logging
+import os
 
 import click
 
@@ -381,14 +382,22 @@ def process_pipeline(ctx, *args, **kwargs):  # noqa: PLR0915
 
         molecule_indices = ctx.obj.get("molecule_indices")
         source = ctx.obj.get("filename")
-        prepared_jobs = prepare_structure_inputs(
-            jobs,
-            source,
-            ctx.obj["subcommand"],
-            prepare_single=bool(
-                source and str(source).lower().endswith(".npz")
-            ),
-        )
+        directory_files = ctx.obj.get("directory_files")
+        if directory_files is not None:
+            if len(jobs) != len(directory_files):
+                raise click.UsageError(
+                    "This Gaussian command does not create one job per input file."
+                )
+            prepared_jobs = zip(jobs, directory_files)
+        else:
+            prepared_jobs = prepare_structure_inputs(
+                jobs,
+                source,
+                ctx.obj["subcommand"],
+                prepare_single=bool(
+                    source and str(source).lower().endswith(".npz")
+                ),
+            )
         batch_cli_args = []
         for index, (single_job, input_file) in enumerate(prepared_jobs):
             structure_index = None
@@ -403,6 +412,13 @@ def process_pipeline(ctx, *args, **kwargs):  # noqa: PLR0915
                 batch_mode=False,
             )
             if input_file is not None:
+                if directory_files is not None:
+                    from chemsmart.utils.io import clean_label
+
+                    stem = os.path.splitext(os.path.basename(input_file))[0]
+                    single_job.label = clean_label(
+                        f"{single_job.label}_{stem}"
+                    )
                 task_args = prepared_structure_arguments(
                     task_args, input_file, single_job.label
                 )

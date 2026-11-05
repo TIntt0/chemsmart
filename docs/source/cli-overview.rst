@@ -159,8 +159,8 @@ These options are only available with ``chemsmart sub``:
 
    -  -  ``-N, --num-nodes``
       -  int
-      -  Enable node-limited batch submission in one SLURM allocation. The value is the maximum node count; each subtask
-         uses ``-n`` cores and pending subtasks start as resources become available.
+      -  Enable node-limited batch submission in one SLURM allocation. The value is the requested node count; each
+         subtask uses ``-n`` cores and pending subtasks start as resources become available.
 
    -  -  ``-v, --verbose/--no-verbose``
       -  bool
@@ -176,6 +176,16 @@ These options are only available with ``chemsmart sub``:
 
 When ``-N`` is omitted, jobs are submitted using the existing per-job behavior. Batch task output and status are
 recorded separately, with a final count of successful, failed, and unfinished tasks.
+
+For Gaussian, ``-f`` can also point to a directory when ``-N`` is supplied. CHEMSMART creates one subtask per visible
+file in that directory, ordered by filename, and uses the last structure from each file. Supported extensions are
+``.xyz``, ``.com``, ``.gjf``, ``.inp``, ``.log``, ``.out``, and ``.npz``. Hidden files and subdirectories are not
+included; an unsupported file stops submission. The input directory must remain accessible to the compute nodes.
+
+.. code:: bash
+
+   chemsmart sub -s cuhk -N 2 -n 64 --mem-gb 180 gaussian -p ag_modred \
+     -f int3tots1/ -c 0 --multiplicity 1 modred -c '[[109,58]]'
 
 ********************
  Available Commands

@@ -547,6 +547,44 @@ def gaussian(
     if structure_index is not None:
         index = structure_index
 
+    directory_files = None
+    if filename and os.path.isdir(filename):
+        if ctx.find_root().params.get("num_nodes") is None:
+            raise click.UsageError(
+                "Directory input currently requires sub -N."
+            )
+        if (
+            index is not None
+            or pubchem
+            or record_index is not None
+            or record_id is not None
+            or structure_id is not None
+            or molecule_id is not None
+        ):
+            raise click.UsageError(
+                "Directory input cannot be combined with structure or database selectors or PubChem."
+            )
+        directory = os.path.abspath(filename)
+        directory_files = sorted(
+            os.path.join(directory, name)
+            for name in os.listdir(directory)
+            if not name.startswith(".")
+            and os.path.isfile(os.path.join(directory, name))
+        )
+        if not directory_files:
+            raise click.UsageError("The input directory contains no files.")
+        supported = (".xyz", ".com", ".gjf", ".inp", ".log", ".out", ".npz")
+        unsupported = [
+            path
+            for path in directory_files
+            if not path.lower().endswith(supported)
+        ]
+        if unsupported:
+            raise click.UsageError(
+                f"Unsupported file in input directory: {unsupported[0]}"
+            )
+        filename = directory
+
     is_chemsmart_db = is_chemsmart_database(filename)
     if is_chemsmart_db:
         record_selectors = [record_index is not None, record_id is not None]
@@ -582,7 +620,9 @@ def gaussian(
         or (is_pka_cdxml_input(filename) and is_pka_batch_invocation(ctx))
     )
 
-    if filename is None:
+    if directory_files is not None:
+        job_settings = GaussianJobSettings.default()
+    elif filename is None:
         # for cases where filename is not supplied, eg,
         #  get structure from pubchem
         job_settings = GaussianJobSettings.default()
@@ -724,7 +764,17 @@ def gaussian(
             )
 
     if filename and not is_pka_table_input:
-        if is_chemsmart_db:
+        if directory_files is not None:
+            molecules = []
+            for path in directory_files:
+                molecule = Molecule.from_filepath(path, index="-1")
+                if molecule is None or isinstance(molecule, list):
+                    raise click.UsageError(
+                        f"Expected one structure in {path}."
+                    )
+                molecules.append(molecule)
+            molecule_indices = list(range(1, len(molecules) + 1))
+        elif is_chemsmart_db:
             if structure_id is not None:
                 molecules = Molecule.from_filepath(
                     filepath=filename,
@@ -868,6 +918,7 @@ def gaussian(
     )
     ctx.obj["label"] = label
     ctx.obj["filename"] = filename
+    ctx.obj["directory_files"] = directory_files
 
 
 @gaussian.result_callback()
