@@ -338,7 +338,8 @@ def xtb(
             if (
                 index is None
                 and filename.lower().endswith(".npz")
-                and ctx.find_root().params.get("num_nodes") is not None
+                and ctx.parent is not None
+                and ctx.parent.params.get("num_nodes") is not None
             ):
                 index = ":"
             molecules, molecule_indices = Molecule.from_filepath_with_indices(

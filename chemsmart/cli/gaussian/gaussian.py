@@ -549,7 +549,7 @@ def gaussian(
 
     directory_files = None
     if filename and os.path.isdir(filename):
-        if ctx.find_root().params.get("num_nodes") is None:
+        if ctx.parent is None or ctx.parent.params.get("num_nodes") is None:
             raise click.UsageError(
                 "Directory input currently requires sub -N."
             )

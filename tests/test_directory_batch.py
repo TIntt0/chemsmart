@@ -3,6 +3,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
+from chemsmart.cli.main import entry_point
 from chemsmart.cli.run import run
 from chemsmart.cli.sub import sub
 from chemsmart.settings.server import Server
@@ -24,8 +25,9 @@ def test_gaussian_directory_modred_submits_single_batch(tmp_path, monkeypatch):
         patch.object(server, "submit_batch_job") as submit,
     ):
         result = CliRunner().invoke(
-            sub,
+            entry_point,
             [
+                "sub",
                 "-s",
                 "cuhk",
                 "-N",
@@ -161,6 +163,65 @@ def test_empty_directory_is_not_submitted(tmp_path, monkeypatch):
     assert result.exit_code != 0
     assert "contains no files" in result.output
     submit.assert_not_called()
+
+
+def test_full_cli_directory_requires_num_nodes(tmp_path, monkeypatch):
+    directory = tmp_path / "structures"
+    directory.mkdir()
+    (directory / "molecule.xyz").write_text("1\nhelium\nHe 0 0 0\n")
+    server = Server("test", SCHEDULER="SLURM", NUM_CORES=8, MEM_GB=24)
+    monkeypatch.chdir(tmp_path)
+    with patch("chemsmart.cli.sub.Server.current", return_value=server):
+        result = CliRunner().invoke(
+            entry_point,
+            [
+                "sub",
+                "--test",
+                "gaussian",
+                "-p",
+                "test",
+                "-f",
+                str(directory),
+                "sp",
+            ],
+        )
+    assert result.exit_code != 0
+    assert "requires sub -N" in result.output
+
+
+def test_full_cli_xtb_npz_without_index_prepares_all_structures(
+    tmp_path, monkeypatch
+):
+    source = Path(__file__).parent / "data/IOTests/revQM9_subset.npz"
+    server = Server(
+        "test", SCHEDULER="SLURM", NUM_CORES=8, MEM_GB=24, NUM_GPUS=0
+    )
+    monkeypatch.chdir(tmp_path)
+    with (
+        patch("chemsmart.cli.sub.Server.current", return_value=server),
+        patch.object(server, "submit_batch_job") as submit,
+    ):
+        result = CliRunner().invoke(
+            entry_point,
+            [
+                "sub",
+                "-N",
+                "2",
+                "--test",
+                "xtb",
+                "-p",
+                "test",
+                "-f",
+                str(source),
+                "-c",
+                "0",
+                "-m",
+                "1",
+                "sp",
+            ],
+        )
+    assert result.exit_code == 0, (result.output, result.exception)
+    assert len(submit.call_args.kwargs["jobs"]) == 5
 
 
 def test_directory_writes_one_slurm_script_and_manifest(tmp_path, monkeypatch):
