@@ -1970,7 +1970,9 @@ class FolderMixin:
             return filetype
         return filetype if filetype.startswith(".") else f".{filetype}"
 
-    def _get_all_output_files_by_program(self, program=None, recursive=False):
+    def _get_all_output_files_by_program(
+        self, program=None, recursive=False, progress_callback=None
+    ):
         """
         Obtain a list of quantum chemistry output files by program.
         File discovery is performed in two stages:
@@ -2005,7 +2007,16 @@ class FolderMixin:
         candidate_files = []
         if recursive:
             for subdir, _dirs, files in os.walk(self.folder):
+                if progress_callback is not None:
+                    progress_callback("directories", 1)
                 for file in files:
+                    suffixes = (
+                        ALL_SUFFIXES
+                        if program is None
+                        else tuple(PROGRAM_INFO[program]["suffixes"])
+                    )
+                    if not file.endswith(suffixes):
+                        continue
                     filepath = os.path.join(subdir, file)
                     # Skip directories and empty files
                     if not os.path.isfile(filepath):
@@ -2039,6 +2050,8 @@ class FolderMixin:
         matched_files = []
         for filepath in candidate_files:
             detected_program = get_program_type_from_file(filepath)
+            if progress_callback is not None:
+                progress_callback("candidates", 1)
             if detected_program == "unknown":
                 continue
             if program is None or detected_program == program:
@@ -2061,7 +2074,7 @@ class FolderMixin:
         )
 
     def get_all_output_files_in_current_folder_and_subfolders_by_program(
-        self, program=None
+        self, program=None, progress_callback=None
     ):
         """
         Obtain quantum chemistry output files in folder and all subfolders by program.
@@ -2074,7 +2087,9 @@ class FolderMixin:
             list[str]: Full file paths matching the specified program.
         """
         return self._get_all_output_files_by_program(
-            program=program, recursive=True
+            program=program,
+            recursive=True,
+            progress_callback=progress_callback,
         )
 
     def is_program_calculation_directory(self, program):

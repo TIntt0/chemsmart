@@ -9,10 +9,10 @@ from chemsmart.database.assemble import (
     SingleFolderAssembler,
 )
 from chemsmart.database.database import Database
-from chemsmart.io.folder import BaseFolder
 from chemsmart.io.xtb.folder import XTBFolder
 from chemsmart.jobs.job import Job
 from chemsmart.utils.cli import MyCommand
+from chemsmart.utils.io import get_program_type_from_file
 
 from .database import database
 
@@ -111,74 +111,67 @@ def assemble(
             "Use 'gaussian', 'orca', or 'xtb'."
         )
 
-    files = []
-    file_programs = programs & {"gaussian", "orca"}
-    if file_programs:
-        base_folder = BaseFolder(folder=directory)
-        for prog in sorted(file_programs):
-            files.extend(
-                base_folder.get_all_output_files_in_current_folder_and_subfolders_by_program(
-                    program=prog
+    def iter_targets():
+        """Discover and assemble supported calculations during one tree walk."""
+        visited = 0
+        detected = 0
+        logger.info("Scanning calculation outputs in %s", directory)
+
+        def report_error(error):
+            logger.error("Cannot scan directory: %s", error)
+
+        for folder, _dirs, filenames in os.walk(
+            directory, onerror=report_error
+        ):
+            visited += 1
+            if visited % 100 == 0:
+                logger.info(
+                    "Scanning: %d directories visited, %d sources found",
+                    visited,
+                    detected,
                 )
-            )
-        files = sorted(set(files))
-
-    folders = []
-    folder_programs = programs & {"xtb"}
-    if folder_programs:
-        base_folder = BaseFolder(folder=directory)
-        for prog in sorted(folder_programs):
-            output_files = base_folder.get_all_output_files_in_current_folder_and_subfolders_by_program(
-                program=prog
-            )
-            candidate_folders = {
-                os.path.dirname(os.path.abspath(output_file))
-                for output_file in output_files
-            }
-            if prog == "xtb":
-                for folder in sorted(candidate_folders):
-                    try:
-                        is_calculation_directory = XTBFolder(
-                            folder=folder
-                        ).is_xtb_calculation_directory
-                    except ValueError as e:
-                        logger.error(
-                            f"Skipping invalid xTB calculation directory "
-                            f"'{folder}': {e}"
-                        )
-                        continue
-                    if is_calculation_directory:
-                        folders.append(folder)
-        folders = sorted(set(folders))
-
-    if not files and not folders:
-        program_label = program or "gaussian, orca, or xtb"
-        logger.error(
-            f"No {program_label} output found in directory: {directory}"
-        )
-        return None
-
-    if program is None:
+            xtb_candidate = False
+            for name in sorted(filenames):
+                if name.endswith(".out"):
+                    xtb_candidate = True
+                if not (programs & {"gaussian", "orca"}) or not name.endswith(
+                    (".log", ".out")
+                ):
+                    continue
+                path = os.path.join(folder, name)
+                if get_program_type_from_file(path) in programs & {
+                    "gaussian",
+                    "orca",
+                }:
+                    detected += 1
+                    yield path, SingleFileAssembler, "filename"
+            if "xtb" in programs and xtb_candidate:
+                try:
+                    valid = XTBFolder(
+                        folder=folder
+                    ).is_xtb_calculation_directory
+                except ValueError as exc:
+                    logger.error(
+                        "Skipping invalid xTB directory '%s': %s", folder, exc
+                    )
+                    continue
+                if valid:
+                    detected += 1
+                    yield folder, SingleFolderAssembler, "folder"
         logger.info(
-            f"Found {len(files)} output file(s) and "
-            f"{len(folders)} xTB folder(s), assembling..."
+            "Finished scanning: %d directories visited, %d sources found",
+            visited,
+            detected,
         )
-    elif program == "xtb":
-        logger.info(f"Found {len(folders)} xTB folder(s), assembling...")
-    else:
-        logger.info(
-            f"Found {len(files)} {program} output files, assembling..."
-        )
+
+    targets = iter_targets()
 
     # Commit bounded batches so long jobs make progress and retain completed work.
     db = None
     batch = []
     inserted = 0
     processed = 0
-    total = len(files) + len(folders)
-    for target, assembler_class, keyword in [
-        (file, SingleFileAssembler, "filename") for file in files
-    ] + [(folder, SingleFolderAssembler, "folder") for folder in folders]:
+    for target, assembler_class, keyword in targets:
         try:
             assembler = assembler_class(
                 **{keyword: target}, index=index, include_failed=include_failed
@@ -195,16 +188,15 @@ def assemble(
         if len(batch) >= 100:
             inserted += db.insert_records(batch)
             batch.clear()
-        if processed % 100 == 0 or processed == total:
+        if processed % 100 == 0:
             logger.info(
-                "Processed %d/%d sources; wrote %d records",
-                processed,
-                total,
-                inserted,
+                "Processed %d sources; wrote %d records", processed, inserted
             )
 
     if batch:
         inserted += db.insert_records(batch)
+    if not processed:
+        logger.error("No supported calculation outputs found in %s", directory)
     if not inserted:
         logger.error("No valid data inserted.")
         return None

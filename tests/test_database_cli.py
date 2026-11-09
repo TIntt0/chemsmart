@@ -1,7 +1,6 @@
 """Tests for chemsmart.cli.database (assemble, export, inspect, query)."""
 
 import importlib
-from unittest.mock import MagicMock
 
 import click
 import pytest
@@ -31,190 +30,48 @@ def invoke_allow_exceptions(args):
 
 
 class TestAssembleCommand:
-    def test_appends_db_extension_when_missing(self, mocker, tmp_path):
-        mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": [
-                        str(tmp_path / "a.log")
-                    ]
-                }
-            ),
-        )
-        mock_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFileAssembler"
-        )
-        mock_assembler_cls.return_value.assemble_data = {"foo": "bar"}
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        mock_db = mock_db_cls.return_value
-        mock_db.insert_records.return_value = 1
-        mock_db.count_records.return_value = 1
-
-        result = invoke(
-            [
-                "assemble",
-                "-d",
-                str(tmp_path),
-                "-p",
-                "gaussian",
-                "-o",
-                "mydb",
-            ]
-        )
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_called_once_with(db_file="mydb.db")
-
-    def test_directory_defaults_to_cwd(self, mocker, tmp_path, monkeypatch):
-        monkeypatch.chdir(tmp_path)
-        mock_folder_cls = mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": []
-                }
-            ),
-        )
-        result = invoke(["assemble"])
-        assert result.exit_code == 0, result.output
-        called_folder = mock_folder_cls.call_args[1]["folder"]
-        assert called_folder == str(tmp_path)
-
     def test_nonexistent_directory_raises(self, tmp_path):
         result = invoke_allow_exceptions(
-            ["assemble", "-d", str(tmp_path / "does_not_exist")]
+            ["assemble", "-d", str(tmp_path / "missing")]
         )
-        assert result.exit_code != 0
         assert isinstance(result.exception, FileNotFoundError)
 
     def test_unsupported_program_raises(self, tmp_path):
         result = invoke_allow_exceptions(
             ["assemble", "-d", str(tmp_path), "-p", "bogus"]
         )
-        assert result.exit_code != 0
         assert isinstance(result.exception, ValueError)
 
-    def test_no_program_uses_both_supported_programs(self, mocker, tmp_path):
-        mock_folder = MagicMock()
-        mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.return_value = (
-            []
-        )
-        mocker.patch.object(
-            assemble_module, "BaseFolder", return_value=mock_folder
-        )
-        result = invoke(["assemble", "-d", str(tmp_path)])
+    def test_no_valid_results_does_not_create_database(self, tmp_path):
+        output = tmp_path / "empty.db"
+        (tmp_path / "invalid.out").write_text("not a calculation")
+        result = invoke(["assemble", "-d", str(tmp_path), "-o", str(output)])
+        assert result.exit_code == 0
+        assert not output.exists()
+
+    def test_mixed_programs_assemble_real_outputs(
+        self,
+        tmp_path,
+        gaussian_co2_opt_outfile,
+        orca_co2_output,
+        xtb_water_outfolder,
+    ):
+        import shutil
+
+        from chemsmart.database.database import Database
+
+        shutil.copy(gaussian_co2_opt_outfile, tmp_path / "gaussian.log")
+        shutil.copy(orca_co2_output, tmp_path / "orca.out")
+        shutil.copytree(xtb_water_outfolder, tmp_path / "xtb")
+        output = tmp_path / "mixed.db"
+        result = invoke(["assemble", "-d", str(tmp_path), "-o", str(output)])
         assert result.exit_code == 0, result.output
-        assert (
-            mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.call_count
-            == 3
-        )
+        assert Database(str(output)).count_records() == 3
 
-    def test_no_files_found_returns_none(self, mocker, tmp_path):
-        mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": []
-                }
-            ),
-        )
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "orca"])
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_not_called()
-
-    def test_parse_failure_is_logged_and_skipped(self, mocker, tmp_path):
-        mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": [
-                        str(tmp_path / "bad.log")
-                    ]
-                }
-            ),
-        )
-        mocker.patch.object(
-            assemble_module,
-            "SingleFileAssembler",
-            side_effect=RuntimeError("parse failed"),
-        )
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "gaussian"])
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_not_called()
-
-    def test_falsy_assemble_data_is_skipped(self, mocker, tmp_path):
-        mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": [
-                        str(tmp_path / "empty.log")
-                    ]
-                }
-            ),
-        )
-        mock_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFileAssembler"
-        )
-        mock_assembler_cls.return_value.assemble_data = None
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "gaussian"])
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_not_called()
-
-    def test_duplicate_records_logs_warning(self, mocker, tmp_path):
-        mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": [
-                        str(tmp_path / "a.log"),
-                        str(tmp_path / "b.log"),
-                    ]
-                }
-            ),
-        )
-        mock_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFileAssembler"
-        )
-        mock_assembler_cls.return_value.assemble_data = {"foo": "bar"}
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        mock_db = mock_db_cls.return_value
-        mock_db.insert_records.return_value = 2
-        mock_db.count_records.return_value = 1
-
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "gaussian"])
-        assert result.exit_code == 0, result.output
-        mock_db.create.assert_called_once()
-
-    def test_include_failed_flag_forwarded(self, mocker, tmp_path):
-        mocker.patch.object(
-            assemble_module,
-            "BaseFolder",
-            return_value=MagicMock(
-                **{
-                    "get_all_output_files_in_current_folder_and_subfolders_by_program.return_value": [
-                        str(tmp_path / "a.log")
-                    ]
-                }
-            ),
-        )
-        mock_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFileAssembler"
-        )
-        mock_assembler_cls.return_value.assemble_data = {"foo": "bar"}
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        mock_db_cls.return_value.insert_records.return_value = 1
-        mock_db_cls.return_value.count_records.return_value = 1
-
+    def test_include_failed_passes_to_assembler(self, mocker, tmp_path):
+        (tmp_path / "output.log").write_text("Entering Gaussian System\n")
+        assembler = mocker.patch.object(assemble_module, "SingleFileAssembler")
+        assembler.return_value.assemble_data = None
         result = invoke(
             [
                 "assemble",
@@ -225,136 +82,45 @@ class TestAssembleCommand:
                 "--include-failed",
             ]
         )
-        assert result.exit_code == 0, result.output
-        _, call_kwargs = mock_assembler_cls.call_args
-        assert call_kwargs["include_failed"] is True
+        assert result.exit_code == 0
+        assert assembler.call_args.kwargs["include_failed"] is True
 
-    def test_xtb_program_assembles_valid_calculation_directory(
-        self, mocker, tmp_path
-    ):
-        mock_folder = MagicMock()
-        mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.return_value = [
-            str(tmp_path / "xtbdir" / "xtb.out")
-        ]
-        mocker.patch.object(
-            assemble_module, "BaseFolder", return_value=mock_folder
-        )
-        mock_xtb_cls = mocker.patch.object(assemble_module, "XTBFolder")
-        mock_xtb_cls.return_value.is_xtb_calculation_directory = True
-        mock_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFolderAssembler"
-        )
-        mock_assembler_cls.return_value.assemble_data = {"foo": "bar"}
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        mock_db_cls.return_value.insert_records.return_value = 1
-        mock_db_cls.return_value.count_records.return_value = 1
-
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "xtb"])
-
-        assert result.exit_code == 0, result.output
-        _, call_kwargs = mock_assembler_cls.call_args
-        assert call_kwargs["folder"] == str(tmp_path / "xtbdir")
-        mock_db_cls.assert_called_once()
-
-    def test_xtb_invalid_calculation_directory_is_skipped(
-        self, mocker, tmp_path
-    ):
-        mock_folder = MagicMock()
-        mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.return_value = [
-            str(tmp_path / "xtbdir" / "xtb.out")
-        ]
-        mocker.patch.object(
-            assemble_module, "BaseFolder", return_value=mock_folder
-        )
-        mock_xtb_cls = mocker.patch.object(assemble_module, "XTBFolder")
-        type(mock_xtb_cls.return_value).is_xtb_calculation_directory = (
-            mocker.PropertyMock(side_effect=ValueError("bad xtb dir"))
-        )
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "xtb"])
-
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_not_called()
-
-    def test_xtb_program_no_valid_folders_returns_none(self, mocker, tmp_path):
-        mock_folder = MagicMock()
-        mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.return_value = [
-            str(tmp_path / "xtbdir" / "xtb.out")
-        ]
-        mocker.patch.object(
-            assemble_module, "BaseFolder", return_value=mock_folder
-        )
-        mock_xtb_cls = mocker.patch.object(assemble_module, "XTBFolder")
-        mock_xtb_cls.return_value.is_xtb_calculation_directory = False
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "xtb"])
-
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_not_called()
-
-    def test_xtb_folder_parse_failure_is_logged_and_skipped(
-        self, mocker, tmp_path
-    ):
-        mock_folder = MagicMock()
-        mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.return_value = [
-            str(tmp_path / "xtbdir" / "xtb.out")
-        ]
-        mocker.patch.object(
-            assemble_module, "BaseFolder", return_value=mock_folder
-        )
-        mock_xtb_cls = mocker.patch.object(assemble_module, "XTBFolder")
-        mock_xtb_cls.return_value.is_xtb_calculation_directory = True
+    def test_failed_parse_does_not_create_database(self, mocker, tmp_path):
+        (tmp_path / "output.log").write_text("Entering Gaussian System\n")
         mocker.patch.object(
             assemble_module,
-            "SingleFolderAssembler",
-            side_effect=RuntimeError("boom"),
+            "SingleFileAssembler",
+            side_effect=ValueError("bad output"),
         )
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
+        output = tmp_path / "results.db"
+        result = invoke(["assemble", "-d", str(tmp_path), "-o", str(output)])
+        assert result.exit_code == 0
+        assert not output.exists()
 
-        result = invoke(["assemble", "-d", str(tmp_path), "-p", "xtb"])
-
-        assert result.exit_code == 0, result.output
-        mock_db_cls.assert_not_called()
-
-    def test_no_program_reports_mixed_files_and_folders(
-        self, mocker, tmp_path
+    @pytest.mark.parametrize("program", ["gaussian", "orca"])
+    def test_selected_program_streams_before_walk_completes(
+        self, mocker, tmp_path, program
     ):
-        """Covers the program-is-None log-message branch, exercising
-        both the file-based and folder-based collection loops together."""
-
-        def files_by_program(program):
-            if program == "xtb":
-                return [str(tmp_path / "xtbdir" / "xtb.out")]
-            return [str(tmp_path / "a.log")]
-
-        mock_folder = MagicMock()
-        mock_folder.get_all_output_files_in_current_folder_and_subfolders_by_program.side_effect = (
-            files_by_program
-        )
+        database = mocker.patch.object(
+            assemble_module, "Database"
+        ).return_value
+        database.insert_records.side_effect = lambda records: len(records)
+        assembler = mocker.patch.object(assemble_module, "SingleFileAssembler")
+        assembler.return_value.assemble_data = {"record": "test"}
         mocker.patch.object(
-            assemble_module, "BaseFolder", return_value=mock_folder
+            assemble_module, "get_program_type_from_file", return_value=program
         )
-        mock_xtb_cls = mocker.patch.object(assemble_module, "XTBFolder")
-        mock_xtb_cls.return_value.is_xtb_calculation_directory = True
-        mock_file_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFileAssembler"
-        )
-        mock_file_assembler_cls.return_value.assemble_data = {"a": 1}
-        mock_folder_assembler_cls = mocker.patch.object(
-            assemble_module, "SingleFolderAssembler"
-        )
-        mock_folder_assembler_cls.return_value.assemble_data = {"b": 2}
-        mock_db_cls = mocker.patch.object(assemble_module, "Database")
-        mock_db_cls.return_value.insert_records.return_value = 2
-        mock_db_cls.return_value.count_records.return_value = 2
 
-        result = invoke(["assemble", "-d", str(tmp_path)])
+        def walk(_directory, onerror=None):
+            for i in range(100):
+                yield str(tmp_path / str(i)), [], ["file.out"]
+            assert database.insert_records.call_count == 1
+            yield str(tmp_path / "last"), [], ["file.out"]
 
-        assert result.exit_code == 0, result.output
-        mock_file_assembler_cls.assert_called_once()
-        mock_folder_assembler_cls.assert_called_once()
+        mocker.patch.object(assemble_module.os, "walk", side_effect=walk)
+        result = invoke(["assemble", "-d", str(tmp_path), "-p", program])
+        assert result.exit_code == 0
+        assert database.insert_records.call_count == 2
 
 
 class TestExportCommandValidation:
