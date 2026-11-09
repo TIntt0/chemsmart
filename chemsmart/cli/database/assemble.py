@@ -171,8 +171,7 @@ def assemble(
         )
 
     # Commit bounded batches so long jobs make progress and retain completed work.
-    db = Database(db_file=output)
-    db.create()
+    db = None
     batch = []
     inserted = 0
     processed = 0
@@ -186,6 +185,9 @@ def assemble(
             )
             data = assembler.assemble_data
             if data:
+                if db is None:
+                    db = Database(db_file=output)
+                    db.create()
                 batch.append(data)
         except Exception:
             logger.exception("Failed to parse %s", target)
