@@ -7,7 +7,7 @@ import click
 from chemsmart.database.query import DatabaseQuery
 from chemsmart.utils.cli import MyCommand
 
-from .database import database
+from .database import database, prepare_database_submission
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,10 @@ def query(ctx, file, target, query, limit):
         chemsmart run database query -f my.db -t molecules -q "mass > 100"
         chemsmart run database query -f my.db -t structures -l 10
     """
+    job = prepare_database_submission(ctx, "query", {"file": file})
+    if job is not None:
+        return job
+
     logger.info(f"Validating database: {file}")
     file = os.path.abspath(file)
     if not os.path.isfile(file):

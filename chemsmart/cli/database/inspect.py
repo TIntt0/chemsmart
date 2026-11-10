@@ -7,7 +7,11 @@ import click
 from chemsmart.database.inspect import DatabaseInspector
 from chemsmart.utils.cli import MyCommand
 
-from .database import click_database_id_options, database
+from .database import (
+    click_database_id_options,
+    database,
+    prepare_database_submission,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -62,6 +66,10 @@ def inspect(
         chemsmart run database inspect -f my.db --mid CURLTUGMZLYLDI-U
         chemsmart run database inspect -f my.db --sid c4d5e6f78a9b
     """
+    job = prepare_database_submission(ctx, "inspect", {"file": file})
+    if job is not None:
+        return job
+
     logger.info(f"Validating database: {file}")
     file = os.path.abspath(file)
     if not os.path.isfile(file):

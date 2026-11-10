@@ -7,7 +7,11 @@ import click
 from chemsmart.database.export import CSV_OPTIONAL_COLUMNS, DatabaseExporter
 from chemsmart.utils.cli import MyCommand
 
-from .database import click_database_id_options, database
+from .database import (
+    click_database_id_options,
+    database,
+    prepare_database_submission,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +111,12 @@ def export(
         chemsmart run database export -f my.db --sid 0df6b2ea4bdc -o struct.extxyz
         chemsmart run database export -f my.db --mid BLQJIBCZHWBKSL-U -x 'MN15/def2tzvp' -o conformers.extxyz
     """
+    job = prepare_database_submission(
+        ctx, "export", {"file": file, "output": output}
+    )
+    if job is not None:
+        return job
+
     logger.info(f"Validating database: {file}")
     file = os.path.abspath(file)
     if not os.path.isfile(file):

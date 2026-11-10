@@ -158,3 +158,40 @@ def test_real_xtb_folder_assembles_to_database(tmp_path, xtb_water_outfolder):
     )
     assert result.exit_code == 0, result.output + repr(result.exception)
     assert Database(str(path)).count_records() == 1
+
+
+def test_all_database_commands_submit_without_executing(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    server = Server(name="dummy")
+    cases = [
+        (
+            "export",
+            ["-f", "input.db", "-k", "smiles,total_energy", "-o", "out.csv"],
+        ),
+        ("query", ["-f", "input.db", "-q", "charge = 0"]),
+        ("inspect", ["-f", "input.db", "--ri", "1"]),
+    ]
+    for operation, arguments in cases:
+        with (
+            patch.object(Server, "from_servername", return_value=server),
+            patch.object(server, "submit") as submit,
+        ):
+            result = CliRunner().invoke(
+                entry_point,
+                [
+                    "sub",
+                    "-s",
+                    "dummy",
+                    "--test",
+                    "database",
+                    operation,
+                    *arguments,
+                ],
+            )
+        assert result.exit_code == 0, result.output + repr(result.exception)
+        submit.assert_called_once()
+        args = submit.call_args.kwargs["cli_args"]
+        assert str(tmp_path / "input.db") in args
+        if operation == "export":
+            assert str(tmp_path / "out.csv") in args
+        assert not (tmp_path / "out.csv").exists()

@@ -120,3 +120,12 @@ progress is logged every 100 sources. Gaussian, ORCA, and xTB calculations are s
 discovery logs every 100 directories. The total number of sources is unknown until scanning completes. If a single
 filesystem operation blocks, progress messages pause until it returns. If a job is interrupted, rerunning scans the
 inputs again and replaces records with matching IDs.
+
+The ``export``, ``query``, and ``inspect`` commands also support ``sub``. For example:
+
+.. code::
+
+   chemsmart sub database export -f xtb.db -k smiles,total_energy -o xtb.csv
+
+Query and inspection output is written to the scheduler's job log. Input and output paths must be accessible on the
+compute node, and the CHEMSMART Python environment must be available there.
