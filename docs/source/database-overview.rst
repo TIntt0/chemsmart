@@ -160,3 +160,51 @@ A typical CHEMSMART database workflow is:
    geometry using RDKit heuristics, not from first-principles electronic structure. Bond orders are inferred from
    interatomic distances, which may give incorrect results for unusual bonding, metal-ligand interactions, or strained
    systems. These tags should be treated as approximate.
+
+***************************************
+ Validated structure fields and repair
+***************************************
+
+New ``chemsmart run database assemble`` imports derive SMILES, InChI, ring membership, aromaticity, chirality and
+fragment counts from one RDKit molecular graph, using the geometry and molecular charge. Failed conversions retain the
+geometry and calculation data, store null derived fields, and record the error in ``structure_conversions``. Existing
+nonempty fields are not automatically replaced during assembly.
+
+To inspect an existing database, first run a preview:
+
+.. code::
+
+   chemsmart run database repair-structure -f molecules.db \
+       --scope all --limit 100 --report preview.jsonl
+
+Inspect the JSONL report, then check the entire database:
+
+.. code::
+
+   chemsmart run database repair-structure -f molecules.db \
+       --scope all --report full-preview.jsonl
+
+To write repairs, use a new report filename and explicitly add ``--apply``:
+
+.. code::
+
+   chemsmart run database repair-structure -f molecules.db \
+       --scope all --report applied.jsonl --apply
+
+The default is a read-only preview. ``--database`` is an alias for ``-f``. Reports must use a new filename. ``--scope
+invalid`` selects nonempty SMILES that cannot be parsed; ``--scope missing`` selects absent or empty SMILES. ``--scope
+all`` is recommended because parseable SMILES may still encode the wrong structure. ``--limit`` counts molecular
+species; all geometries of each selected species are inspected.
+
+The repair rebuilds SMILES, InChI, ``chiral_centers``, ``is_chiral``, ``is_ring``, ``is_aromatic``,
+``is_multicomponent`` and ``num_components``. All geometries belonging to a species must agree before its shared fields
+are updated. Failures and conflicts are reported without changing those fields. Chiral-center indices refer to the input
+atom order; disagreements in these indices also require review. Geometry, energies, forces, molecular and structural
+IDs, and record links remain intact. Existing IDs are not recomputed or merged by this command.
+
+Each applied species update and its audit history are committed together. The ``structure_conversions`` table retains
+old and new values, status, timestamp and RDKit/method version. If a long run is interrupted, already committed species
+remain repaired; a fresh run can check them again.
+
+Bond inference is not guaranteed for unusual valence states, radicals, metals or transition states. Conversion failures
+must be reviewed rather than treated as failed electronic-structure calculations.

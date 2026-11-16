@@ -11,9 +11,11 @@ from quantum chemistry calculations. The database uses four tables:
 
 import logging
 import sqlite3
+from datetime import datetime, timezone
 from pathlib import Path
 
 from chemsmart.database.records import AssembledRecord
+from chemsmart.database.repair import CONVERSION_METHOD, CONVERSION_TABLE
 from chemsmart.database.utils import (
     SCHEMA_VERSION,
     convert_numpy,
@@ -67,6 +69,7 @@ class Database:
         """
         conn = open_connection(self.db_file)
         try:
+            conn.execute(CONVERSION_TABLE)
             version = conn.execute("PRAGMA user_version").fetchone()[0]
             if version not in (0, 1, SCHEMA_VERSION):
                 raise RuntimeError(
@@ -446,13 +449,29 @@ class Database:
                     mol.get("mass"),
                     to_json(mol.get("elements")),
                     to_json(mol.get("element_counts")),
-                    1 if mol.get("is_chiral") else 0,
-                    1 if mol.get("is_ring") else 0,
-                    1 if mol.get("is_aromatic") else 0,
+                    (
+                        None
+                        if mol.get("is_chiral") is None
+                        else int(bool(mol["is_chiral"]))
+                    ),
+                    (
+                        None
+                        if mol.get("is_ring") is None
+                        else int(bool(mol["is_ring"]))
+                    ),
+                    (
+                        None
+                        if mol.get("is_aromatic") is None
+                        else int(bool(mol["is_aromatic"]))
+                    ),
                     1 if mol.get("is_monoatomic") else 0,
                     1 if mol.get("is_diatomic") else 0,
                     1 if mol.get("is_linear") else 0,
-                    1 if mol.get("is_multicomponent") else 0,
+                    (
+                        None
+                        if mol.get("is_multicomponent") is None
+                        else int(bool(mol["is_multicomponent"]))
+                    ),
                     mol.get("num_components"),
                 ),
             )
@@ -478,6 +497,38 @@ class Database:
                     to_json(mol.get("moments_of_inertia")),
                 ),
             )
+
+            conversion = mol.get("structure_conversion")
+            if conversion is not None:
+                conn.execute(CONVERSION_TABLE)
+                conn.execute(
+                    """INSERT INTO structure_conversions
+                    (structure_id, molecule_id, created_at, method, status, error,
+                     new_values_json) VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        structure_id,
+                        molecule_id,
+                        datetime.now(timezone.utc).isoformat(),
+                        CONVERSION_METHOD,
+                        conversion["status"],
+                        conversion["error"],
+                        to_json(
+                            {
+                                key: mol.get(key)
+                                for key in (
+                                    "smiles",
+                                    "inchi",
+                                    "chiral_centers",
+                                    "is_chiral",
+                                    "is_ring",
+                                    "is_aromatic",
+                                    "is_multicomponent",
+                                    "num_components",
+                                )
+                            }
+                        ),
+                    ),
+                )
 
             # Step 3: Insert record-structure link (per-calculation data)
             conn.execute(

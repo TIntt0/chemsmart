@@ -195,6 +195,24 @@ class BaseAssembler:
         return meta_data
 
     def get_molecule_info(self, mol):
+        try:
+            structure_fields = mol.get_structure_fields()
+            structure_status = {"status": "valid", "error": None}
+        except (ValueError, RuntimeError) as exc:
+            structure_fields = dict.fromkeys(
+                (
+                    "smiles",
+                    "inchi",
+                    "chiral_centers",
+                    "is_chiral",
+                    "is_ring",
+                    "is_aromatic",
+                    "is_multicomponent",
+                    "num_components",
+                )
+            )
+            structure_status = {"status": "failed", "error": str(exc)}
+            logger.warning("Structure conversion failed: %s", exc)
         molecule_info = {
             "molecule_label": mol.molecule_label,
             "molecule_id": mol.molecule_id,
@@ -213,17 +231,9 @@ class BaseAssembler:
             "elements": mol.elements,
             "element_counts": mol.element_counts,
             "center_of_mass": mol.center_of_mass,
-            "is_chiral": mol.is_chiral,
-            "is_ring": mol.is_ring,
-            "is_aromatic": mol.is_aromatic,
             "is_monoatomic": mol.is_monoatomic,
             "is_diatomic": mol.is_diatomic,
             "is_linear": mol.is_linear,
-            "is_multicomponent": mol.is_multicomponent,
-            "num_components": mol.num_components,
-            "smiles": mol.smiles,
-            "inchi": mol.inchi,
-            "chiral_centers": mol.chiral_centers,
             "moments_of_inertia": mol.moments_of_inertia,
             "moments_of_inertia_tensor": mol.moments_of_inertia_tensor,
             "moments_of_inertia_principal_axes": (
@@ -241,6 +251,8 @@ class BaseAssembler:
             "vibrational_ir_intensities": mol.vibrational_ir_intensities,
             "vibrational_mode_symmetries": mol.vibrational_mode_symmetries,
         }
+        molecule_info.update(structure_fields)
+        molecule_info["structure_conversion"] = structure_status
         if mol.mulliken_atomic_charges is not None:
             molecule_info["mulliken_atomic_charges"] = (
                 mol.mulliken_atomic_charges

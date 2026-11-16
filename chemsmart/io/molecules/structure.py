@@ -2326,15 +2326,51 @@ class Molecule:
             f.write(self.to_cosmorsxyz())
             f.write("\n")
 
-    def to_smiles(self):
-        """
-        Convert molecule to SMILES string.
-        """
-        # Create an RDKit molecule
-        rdkit_mol = self.to_rdkit()
+    def get_structure_fields(self):
+        """Derive database fields from one validated, charge-aware graph.
 
-        # Convert RDKit molecule to SMILES
-        return Chem.MolToSmiles(rdkit_mol)
+        Atom indices in chiral_centers refer to the input coordinates (1-based).
+        Failure raises rather than returning a partially derived field set.
+        """
+        mol = self.to_rdkit(bond_method="rdkit")
+        Chem.SanitizeMol(mol)
+        smiles = Chem.MolToSmiles(mol)
+        if Chem.MolFromSmiles(smiles) is None:
+            raise ValueError("Generated SMILES failed RDKit validation.")
+        inchi = Chem.MolToInchi(mol)
+        if not inchi:
+            raise ValueError("RDKit failed to generate InChI.")
+        centers = Chem.FindMolChiralCenters(
+            mol, force=True, includeUnassigned=True
+        )
+        components = len(Chem.GetMolFrags(mol))
+        return {
+            "smiles": smiles,
+            "inchi": inchi,
+            "chiral_centers": {idx + 1: label for idx, label in centers},
+            "is_chiral": bool(Chem.FindMolChiralCenters(mol, force=True)),
+            "is_ring": bool(Chem.GetSymmSSSR(mol)),
+            "is_aromatic": any(
+                atom.GetIsAromatic() for atom in mol.GetAtoms()
+            ),
+            "is_multicomponent": components > 1,
+            "num_components": components,
+        }
+
+    def to_smiles(self, bond_method="rdkit"):
+        """
+        Convert coordinates to a validated SMILES string.
+
+        Bond perception defaults to RDKit and uses the molecular charge.
+        ``bond_method="chemsmart"`` selects the legacy distance heuristics,
+        but the resulting structure must still pass chemical validation.
+        """
+        rdkit_mol = self.to_rdkit(bond_method=bond_method)
+        Chem.SanitizeMol(rdkit_mol)
+        smiles = Chem.MolToSmiles(rdkit_mol)
+        if Chem.MolFromSmiles(smiles) is None:
+            raise ValueError("Generated SMILES failed RDKit validation.")
+        return smiles
 
     def to_pdb(
         self,
@@ -2550,6 +2586,19 @@ class Molecule:
             if not add_bonds:
                 raise ValueError(
                     "add_bonds=False is incompatible with bond_method='rdkit'"
+                )
+
+            if (
+                self.num_atoms == 0
+                or np.shape(self.positions) != (self.num_atoms, 3)
+                or not np.isfinite(self.positions).all()
+            ):
+                raise ValueError(
+                    "Bond perception requires finite (N, 3) coordinates."
+                )
+            if self.charge is not None and int(self.charge) != self.charge:
+                raise ValueError(
+                    "Bond perception requires an integer total charge."
                 )
 
             xyz_lines = [str(self.num_atoms), ""]

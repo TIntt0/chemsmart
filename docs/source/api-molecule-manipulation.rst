@@ -196,3 +196,11 @@ a set of :meth:`to_*` methods.
 
 **Conversion methods:** :meth:`to_ase`, :meth:`to_pymatgen`, :meth:`to_rdkit`, :meth:`to_smiles`, :meth:`to_pdb`,
 :meth:`to_cosmorsxyz`, :meth:`to_graph`, :meth:`to_X_data`.
+
+SMILES generation
+=================
+
+``mol.to_smiles()`` and ``mol.smiles`` infer bonds from coordinates using RDKit and the molecular charge, then validate
+the structure before writing SMILES. Conversion errors are raised rather than returning invalid SMILES. The legacy
+distance method is available with ``mol.to_smiles(bond_method="chemsmart")`` and is also validated. Existing database
+records are not automatically rewritten by this change.

@@ -30,7 +30,12 @@ from chemsmart.utils.cluster import (
     is_pubchem_network_available,
 )
 from chemsmart.utils.utils import cmp_with_ignore
-from tests.helpers import cxsmiles_core, load_last_molecule, read_stripped_text
+from tests.helpers import (
+    cxsmiles_core,
+    load_last_molecule,
+    rdkit_embed_and_optimize,
+    read_stripped_text,
+)
 
 
 class TestCovalentRadiusAndBondCutoff:
@@ -197,6 +202,22 @@ Cl       0      -3.0556310000   -0.1578960000   -0.0001400000
 
 
 class TestStructures:
+    @pytest.mark.parametrize(
+        "smiles", ["N", "O", "C#C", "CO", "c1ccccc1", "[NH4+]"]
+    )
+    def test_smiles_from_coordinates_preserves_structure(self, smiles):
+        reference = rdkit_embed_and_optimize(smiles)
+        molecule = Molecule(
+            symbols=[atom.GetSymbol() for atom in reference.GetAtoms()],
+            positions=reference.GetConformer().GetPositions(),
+            charge=Chem.GetFormalCharge(reference),
+        )
+        result = Chem.MolFromSmiles(molecule.to_smiles())
+        assert result is not None
+        assert Chem.MolToSmiles(result) == Chem.MolToSmiles(
+            Chem.MolFromSmiles(smiles)
+        )
+
     def test_to_rdkit_rejects_invalid_bond_method(self, methanol_molecule):
         with pytest.raises(
             ValueError,
