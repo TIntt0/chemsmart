@@ -59,18 +59,26 @@ def iter_batch_structures(manifest):
         paths = [source_path]
     sequence = 0
     for path in paths:
-        source = (
-            XYZFile(str(path))
-            if path.suffix.lower() == ".xyz"
-            else NPZFile(str(path))
-        )
-        for index, molecule, error in source.iter_molecule_results(
-            manifest["index"]
-        ):
+        try:
+            source = (
+                XYZFile(str(path))
+                if path.suffix.lower() == ".xyz"
+                else NPZFile(str(path))
+            )
+            for index, molecule, error in source.iter_molecule_results(
+                manifest["index"]
+            ):
+                sequence += 1
+                yield (
+                    sequence
+                    if manifest.get("format") == "directory"
+                    else index
+                ), molecule, error
+        except (OSError, ValueError, TypeError, IndexError) as error:
+            if manifest.get("format") != "directory":
+                raise
             sequence += 1
-            yield (
-                sequence if manifest.get("format") == "directory" else index
-            ), molecule, error
+            yield sequence, None, ValueError(f"{path}: {error}")
 
 
 def run_streaming_npz_batch(manifest_path):

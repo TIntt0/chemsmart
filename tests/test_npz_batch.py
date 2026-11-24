@@ -567,3 +567,56 @@ def test_directory_requires_nodes(tmp_path):
 
     with pytest.raises(click.UsageError, match="requires -N"):
         maybe_submit_deferred_npz(["sub", "xtb", "-f", str(tmp_path), "sp"])
+
+
+@pytest.mark.parametrize(
+    "first_content,selection",
+    [
+        ("broken header\n", ":"),
+        ("1\nvalid\nH 0 0 0\n", "2"),
+    ],
+)
+def test_directory_bad_source_does_not_skip_remaining_files(
+    tmp_path, first_content, selection
+):
+    from chemsmart.jobs.batch import iter_batch_structures
+
+    (tmp_path / "a.xyz").write_text(first_content)
+    (tmp_path / "b.xyz").write_text("1\nvalid\nH 0 0 0\n1\nsecond\nH 0 0 1\n")
+    results = list(
+        iter_batch_structures(
+            {
+                "filename": str(tmp_path),
+                "format": "directory",
+                "index": selection,
+            }
+        )
+    )
+    assert [index for index, _, _ in results] == list(
+        range(1, len(results) + 1)
+    )
+    assert "a.xyz" in str(results[0][2])
+    assert results[1][1] is not None
+    assert results[1][2] is None
+
+
+@pytest.mark.parametrize("program", ["gaussian", "orca"])
+def test_deferred_input_rejects_conflicting_indices(program):
+    import click
+
+    with pytest.raises(click.UsageError, match="mutually exclusive"):
+        maybe_submit_deferred_npz(
+            [
+                "sub",
+                "-N",
+                "1",
+                program,
+                "-f",
+                "frames.xyz",
+                "-i",
+                "1",
+                "--si",
+                "2",
+                "sp",
+            ]
+        )

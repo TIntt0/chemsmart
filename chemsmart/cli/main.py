@@ -146,6 +146,14 @@ def maybe_submit_deferred_npz(arguments):
     ):
         return False
 
+    if (
+        program_params.get("index") is not None
+        and program_params.get("structure_index") is not None
+    ):
+        raise click.UsageError(
+            "-i/--index and --si/--structure-index are mutually exclusive."
+        )
+
     from chemsmart.settings.server import Server
 
     server_name = _option_value(global_arguments, "-s", "--server")
