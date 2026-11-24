@@ -94,7 +94,7 @@ def _has_option(arguments, *names):
 
 
 def maybe_submit_deferred_npz(arguments):
-    """Submit NPZ node batches before Click reads the archive.
+    """Submit NPZ/XYZ node batches before Click reads structures.
 
     The submitted allocation streams structures from the archive into a
     bounded worker queue, so expansion happens on the compute system rather
@@ -265,7 +265,7 @@ def maybe_submit_deferred_npz(arguments):
         )
     except RuntimeError as error:
         raise click.ClickException(str(error)) from error
-    click.echo(f"Deferred NPZ batch script: {script}")
+    click.echo(f"Deferred structure batch script: {script}")
     return True
 
 

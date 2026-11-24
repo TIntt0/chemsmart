@@ -51,6 +51,8 @@ def test_multiframe_xyz_uses_deferred_submission(tmp_path, monkeypatch):
         )
     manifest = json.loads(Path("frames_sp_deferred_npz.json").read_text())
     assert manifest["format"] == ".xyz"
+    assert manifest["index"] == ":"
+    assert not list(tmp_path.glob("chemsmart_inputs_*"))
 
 
 def test_npz_node_batch_is_submitted_before_archive_is_read(
