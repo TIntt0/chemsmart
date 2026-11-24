@@ -132,11 +132,28 @@ def maybe_submit_deferred_npz(arguments):
         return False
 
     nodes = _option_value(global_arguments, "-N", "--num-nodes")
+    directory = _option_value(global_arguments, "-d", "--directory")
     filename = program_params.get("filename")
+    if directory is not None:
+        if filename is not None:
+            raise click.UsageError(
+                "Use either -d/--directory or -f/--filename."
+            )
+        if nodes is None:
+            raise click.UsageError("Directory input requires -N/--num-nodes.")
+        if not Path(directory).is_dir():
+            raise click.UsageError(
+                f"Input directory does not exist: {directory}"
+            )
+        filename = str(Path(directory).resolve())
+        program_arguments = [program, "-f", filename, *program_arguments[1:]]
     if (
         nodes is None
         or filename is None
-        or not filename.lower().endswith((".npz", ".xyz"))
+        or (
+            directory is None
+            and not filename.lower().endswith((".npz", ".xyz"))
+        )
     ):
         return False
 
@@ -177,6 +194,8 @@ def maybe_submit_deferred_npz(arguments):
     if not test:
         server.ensure_batch_name_available(label)
     options_with_values = {
+        "-d",
+        "--directory",
         "-N",
         "--num-nodes",
         "-t",
@@ -215,7 +234,11 @@ def maybe_submit_deferred_npz(arguments):
         json.dumps(
             {
                 "filename": str(Path(filename).resolve()),
-                "format": Path(filename).suffix.lower(),
+                "format": (
+                    "directory"
+                    if directory is not None
+                    else Path(filename).suffix.lower()
+                ),
                 "index": (
                     program_params.get("index")
                     or program_params.get("structure_index")

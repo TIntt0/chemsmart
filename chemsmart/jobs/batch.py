@@ -41,11 +41,40 @@ def _replace_task_structure(arguments, filename, label):
     return ["--batch-label", label, *arguments]
 
 
-def run_streaming_npz_batch(manifest_path):
-    """Prepare NPZ or multi-frame XYZ lazily in one SLURM allocation."""
+def iter_batch_structures(manifest):
+    """Read sources on the compute node; directory indices apply per file."""
     from chemsmart.io.npz import NPZFile
     from chemsmart.io.xyz.xyzfile import XYZFile
 
+    source_path = Path(manifest["filename"])
+    if manifest.get("format") == "directory":
+        paths = sorted(
+            path
+            for path in source_path.iterdir()
+            if path.is_file() and path.suffix.lower() in {".xyz", ".npz"}
+        )
+        if not paths:
+            raise ValueError(f"No XYZ or NPZ files in {source_path}")
+    else:
+        paths = [source_path]
+    sequence = 0
+    for path in paths:
+        source = (
+            XYZFile(str(path))
+            if path.suffix.lower() == ".xyz"
+            else NPZFile(str(path))
+        )
+        for index, molecule, error in source.iter_molecule_results(
+            manifest["index"]
+        ):
+            sequence += 1
+            yield (
+                sequence if manifest.get("format") == "directory" else index
+            ), molecule, error
+
+
+def run_streaming_npz_batch(manifest_path):
+    """Prepare NPZ or multi-frame XYZ lazily in one SLURM allocation."""
     manifest_path = Path(manifest_path)
     manifest = json.loads(manifest_path.read_text())
     _batch_capacity(manifest)
@@ -123,14 +152,7 @@ def run_streaming_npz_batch(manifest_path):
     chunk = []
     chunk_number = 0
     with ThreadPoolExecutor(max_workers=active_nodes) as executor:
-        source = (
-            XYZFile(manifest["filename"])
-            if manifest.get("format") == ".xyz"
-            else NPZFile(manifest["filename"])
-        )
-        for index, molecule, error in source.iter_molecule_results(
-            manifest["index"]
-        ):
+        for index, molecule, error in iter_batch_structures(manifest):
             total += 1
             label = f"{manifest['base_label']}_idx{index}"
             if index in previous_successes:

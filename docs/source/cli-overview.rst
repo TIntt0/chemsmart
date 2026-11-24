@@ -212,3 +212,21 @@ For specific job types, see the detailed tutorials:
 
    CHEMSMART checks job name uniqueness. If a job with the same name is already running, submission will be blocked. Use
    ``-a`` (append label) or ``-l`` (label) options to create unique job names.
+
+************************************
+ Deferred XYZ and directory batches
+************************************
+
+For SLURM, use ``sub -N`` to submit a single allocation before reading and expanding XYZ/NPZ structures. Preparation
+runs inside the allocation:
+
+.. code::
+
+   chemsmart sub -N 2 -s server gaussian -p project -f conformers.xyz opt
+   chemsmart sub -N 2 -s server -d structures gaussian -p project opt
+
+``-d`` belongs before the program name and is mutually exclusive with ``-f``. The compute job reads XYZ/NPZ files
+directly inside the directory in sorted filename order; subdirectories are not searched. All frames are selected by
+default. ``-i`` selects frames separately within each file. Directory tasks receive unique sequential ``_idx`` labels
+across files. Keep the directory contents unchanged for reproducible retries, and ensure inputs are accessible from the
+compute nodes. ``--test`` writes the outer script and manifest without submitting or expanding the structures.
