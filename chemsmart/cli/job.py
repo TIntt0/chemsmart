@@ -193,25 +193,14 @@ def click_filename_options(f):
     """Common click options for specifying filenames via CLI."""
 
     @click.option(
-        "-d",
-        "--directory",
-        type=click.Path(file_okay=False, exists=True),
-        help="Directory of XYZ/NPZ inputs for deferred sub -N batches.",
-    )
-    @click.option(
         "-f",
         "--filename",
         type=str,
         default=None,
-        help="Filename from which new input is prepared.",
+        help="Input filename, or directory of XYZ/NPZ files for sub -N batches.",
     )
     @functools.wraps(f)
     def wrapper_common_options(*args, **kwargs):
-        directory = kwargs.pop("directory", None)
-        if directory is not None:
-            raise click.UsageError(
-                "Directory input requires chemsmart sub -N."
-            )
         return f(*args, **kwargs)
 
     return wrapper_common_options

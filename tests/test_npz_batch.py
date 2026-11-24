@@ -539,11 +539,11 @@ def test_directory_submission_defers_reading(tmp_path, monkeypatch, program):
         ),
     ):
         assert maybe_submit_deferred_npz(
-            ["sub", "-N", "1", "--test", program, "-d", str(source), "sp"]
+            ["sub", "-N", "1", "--test", program, "-f", str(source), "sp"]
         )
     manifest = json.loads(Path("inputs_sp_deferred_npz.json").read_text())
     assert manifest["format"] == "directory"
-    assert "-d" not in manifest["task_arguments"]
+    assert "--directory" not in manifest["task_arguments"]
     assert "-f" in manifest["task_arguments"]
     assert not list(tmp_path.glob("chemsmart_inputs_*"))
     assert not (tmp_path / "inputs_sp_deferred_npz_inputs").exists()
@@ -562,27 +562,8 @@ def test_directory_streams_files_and_selects_frames_per_file(tmp_path):
     assert [mol.positions[0, 2] for _, mol, _ in results] == [1, 1]
 
 
-def test_directory_rejects_filename(tmp_path):
-    import click
-
-    with pytest.raises(click.UsageError, match="either"):
-        maybe_submit_deferred_npz(
-            [
-                "sub",
-                "-N",
-                "1",
-                "gaussian",
-                "-d",
-                str(tmp_path),
-                "-f",
-                "other.xyz",
-                "opt",
-            ]
-        )
-
-
 def test_directory_requires_nodes(tmp_path):
     import click
 
     with pytest.raises(click.UsageError, match="requires -N"):
-        maybe_submit_deferred_npz(["sub", "xtb", "-d", str(tmp_path), "sp"])
+        maybe_submit_deferred_npz(["sub", "xtb", "-f", str(tmp_path), "sp"])

@@ -112,7 +112,7 @@ def click_orca_settings_options(f):
         help="Extrapolation basis set.",
     )
     @click.option(
-        "-dg",
+        "-d",
         "--defgrid",
         type=click.Choice(
             ["defgrid1", "defgrid2", "defgrid3"], case_sensitive=False

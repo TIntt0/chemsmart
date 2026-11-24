@@ -990,7 +990,7 @@ class TestGaussianCLIGroupValidation:
                 "custom solvent block",
                 "-t",
                 "my title",
-                "-dt",
+                "-d",
                 "n",
                 "--forces",
                 "sp",

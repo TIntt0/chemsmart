@@ -132,33 +132,10 @@ def maybe_submit_deferred_npz(arguments):
         return False
 
     nodes = _option_value(global_arguments, "-N", "--num-nodes")
-    directory = program_params.get("directory")
     filename = program_params.get("filename")
-    if directory is not None:
-        if filename is not None:
-            raise click.UsageError(
-                "Use either -d/--directory or -f/--filename."
-            )
-        if nodes is None:
-            raise click.UsageError("Directory input requires -N/--num-nodes.")
-        if not Path(directory).is_dir():
-            raise click.UsageError(
-                f"Input directory does not exist: {directory}"
-            )
-        filename = str(Path(directory).resolve())
-        replay_arguments = []
-        position = 1
-        while position < len(program_arguments):
-            argument = program_arguments[position]
-            if argument in {"-d", "--directory"}:
-                position += 2
-                continue
-            if argument.startswith("--directory="):
-                position += 1
-                continue
-            replay_arguments.append(argument)
-            position += 1
-        program_arguments = [program, "-f", filename, *replay_arguments]
+    directory = filename if filename and Path(filename).is_dir() else None
+    if directory is not None and nodes is None:
+        raise click.UsageError("Directory input requires -N/--num-nodes.")
     if (
         nodes is None
         or filename is None
@@ -206,8 +183,6 @@ def maybe_submit_deferred_npz(arguments):
     if not test:
         server.ensure_batch_name_available(label)
     options_with_values = {
-        "-d",
-        "--directory",
         "-N",
         "--num-nodes",
         "-t",
