@@ -223,10 +223,14 @@ runs inside the allocation:
 .. code::
 
    chemsmart sub -N 2 -s server gaussian -p project -f conformers.xyz opt
-   chemsmart sub -N 2 -s server -d structures gaussian -p project opt
+   chemsmart sub -N 2 -s server gaussian -p project -d structures opt
 
-``-d`` belongs before the program name and is mutually exclusive with ``-f``. The compute job reads XYZ/NPZ files
-directly inside the directory in sorted filename order; subdirectories are not searched. All frames are selected by
-default. ``-i`` selects frames separately within each file. Directory tasks receive unique sequential ``_idx`` labels
-across files. Keep the directory contents unchanged for reproducible retries, and ensure inputs are accessible from the
-compute nodes. ``--test`` writes the outer script and manifest without submitting or expanding the structures.
+``-d`` belongs after the program name, just like ``-f`` and is mutually exclusive with ``-f``. The compute job reads
+XYZ/NPZ files directly inside the directory in sorted filename order; subdirectories are not searched. All frames are
+selected by default. ``-i`` selects frames separately within each file. Directory tasks receive unique sequential
+``_idx`` labels across files. Keep the directory contents unchanged for reproducible retries, and ensure inputs are
+accessible from the compute nodes. ``--test`` writes the outer script and manifest without submitting or expanding the
+structures.
+
+The former Gaussian ``-d/--dieze-tag`` short option is now ``-dt``; ORCA ``-d/--defgrid`` is now ``-dg``. Both long
+options remain unchanged.

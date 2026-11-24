@@ -1336,7 +1336,7 @@ class TestORCACLIGroupValidation:
                 "def2/J",
                 "-e",
                 "def2/QZVPP",
-                "-d",
+                "-dg",
                 "defgrid3",
                 "--scf-tol",
                 "TightSCF",

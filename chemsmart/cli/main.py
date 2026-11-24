@@ -132,7 +132,7 @@ def maybe_submit_deferred_npz(arguments):
         return False
 
     nodes = _option_value(global_arguments, "-N", "--num-nodes")
-    directory = _option_value(global_arguments, "-d", "--directory")
+    directory = program_params.get("directory")
     filename = program_params.get("filename")
     if directory is not None:
         if filename is not None:
@@ -146,7 +146,19 @@ def maybe_submit_deferred_npz(arguments):
                 f"Input directory does not exist: {directory}"
             )
         filename = str(Path(directory).resolve())
-        program_arguments = [program, "-f", filename, *program_arguments[1:]]
+        replay_arguments = []
+        position = 1
+        while position < len(program_arguments):
+            argument = program_arguments[position]
+            if argument in {"-d", "--directory"}:
+                position += 2
+                continue
+            if argument.startswith("--directory="):
+                position += 1
+                continue
+            replay_arguments.append(argument)
+            position += 1
+        program_arguments = [program, "-f", filename, *replay_arguments]
     if (
         nodes is None
         or filename is None

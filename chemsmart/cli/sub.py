@@ -37,12 +37,6 @@ logger = logging.getLogger(__name__)
 )
 @click.option("-q", "--queue", type=str, help="Queue name for job submission.")
 @click.option(
-    "-d",
-    "--directory",
-    type=click.Path(file_okay=False, exists=True),
-    help="Read XYZ/NPZ files in this directory in a deferred -N batch.",
-)
-@click.option(
     "-N",
     "--num-nodes",
     type=click.IntRange(min=1),
@@ -80,7 +74,6 @@ def sub(
     time_hours,
     queue,
     num_nodes,
-    directory,
     verbose,
     test,
     print_command,
@@ -92,10 +85,6 @@ def sub(
     This command prepares and submits jobs to cluster schedulers with
     specified resource requirements and queue parameters.
     """
-    if directory is not None:
-        raise click.UsageError(
-            "Directory input requires sub -N through the chemsmart entry point."
-        )
     # Set up logging
     if verbose:
         create_logger(stream=True, debug=True)

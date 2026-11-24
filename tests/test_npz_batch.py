@@ -517,7 +517,8 @@ def test_batch_replay_uses_original_folder_without_temporary_directories(
     assert not list(tmp_path.glob("structure_*_sp"))
 
 
-def test_directory_submission_defers_reading(tmp_path, monkeypatch):
+@pytest.mark.parametrize("program", ["xtb", "gaussian", "orca"])
+def test_directory_submission_defers_reading(tmp_path, monkeypatch, program):
     monkeypatch.chdir(tmp_path)
     source = tmp_path / "inputs"
     source.mkdir()
@@ -527,12 +528,18 @@ def test_directory_submission_defers_reading(tmp_path, monkeypatch):
     with (
         patch("chemsmart.settings.server.Server.current", return_value=server),
         patch(
-            "chemsmart.settings.executable.XTBExecutable.from_servername",
+            "chemsmart.settings.executable."
+            + {
+                "xtb": "XTBExecutable",
+                "gaussian": "GaussianExecutable",
+                "orca": "ORCAExecutable",
+            }[program]
+            + ".from_servername",
             return_value=fake_executable_configuration(),
         ),
     ):
         assert maybe_submit_deferred_npz(
-            ["sub", "-N", "1", "--test", "-d", str(source), "xtb", "sp"]
+            ["sub", "-N", "1", "--test", program, "-d", str(source), "sp"]
         )
     manifest = json.loads(Path("inputs_sp_deferred_npz.json").read_text())
     assert manifest["format"] == "directory"
@@ -555,8 +562,27 @@ def test_directory_streams_files_and_selects_frames_per_file(tmp_path):
     assert [mol.positions[0, 2] for _, mol, _ in results] == [1, 1]
 
 
+def test_directory_rejects_filename(tmp_path):
+    import click
+
+    with pytest.raises(click.UsageError, match="either"):
+        maybe_submit_deferred_npz(
+            [
+                "sub",
+                "-N",
+                "1",
+                "gaussian",
+                "-d",
+                str(tmp_path),
+                "-f",
+                "other.xyz",
+                "opt",
+            ]
+        )
+
+
 def test_directory_requires_nodes(tmp_path):
     import click
 
     with pytest.raises(click.UsageError, match="requires -N"):
-        maybe_submit_deferred_npz(["sub", "-d", str(tmp_path), "xtb", "sp"])
+        maybe_submit_deferred_npz(["sub", "xtb", "-d", str(tmp_path), "sp"])

@@ -100,7 +100,7 @@ def click_gaussian_settings_options(f):
         "input file (e.g., scrf=read).",
     )
     @click.option(
-        "-d",
+        "-dt",
         "--dieze-tag",
         type=str,
         default=None,

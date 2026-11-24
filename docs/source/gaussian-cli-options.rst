@@ -222,7 +222,7 @@ Route and Calculation Options
       -  string
       -  Custom solvent parameters
 
-   -  -  ``-d, --dieze-tag``
+   -  -  ``-dt, --dieze-tag``
       -  string
       -  Route prefix: "n", "p", or "t" for #n, #p, #t
 

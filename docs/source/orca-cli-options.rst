@@ -143,7 +143,7 @@ SCF and Grid Options
       -  Type
       -  Description
 
-   -  -  ``-d, --defgrid``
+   -  -  ``-dg, --defgrid``
       -  choice
       -  Grid: defgrid1, defgrid2, defgrid3 (default: defgrid2)
 
