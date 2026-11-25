@@ -216,7 +216,7 @@ class Executable(RegistryMixin):
                 if line.startswith("export"):
                     line = line.split("#")[0].strip()  # Remove comments
                     line = line[7:]  # Remove 'export ' prefix
-                    key, value = line.split("=")
+                    key, value = line.split("=", 1)
                     env[key] = value
             return env
         return None
