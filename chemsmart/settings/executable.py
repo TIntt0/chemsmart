@@ -195,7 +195,7 @@ class Executable(RegistryMixin):
             for line in self.envars.split("\n"):
                 line = line.split("#")[0].strip()  # Remove comments
                 if "SCRATCH" in line:
-                    return line.split("=")[1]
+                    return line.split("=", 1)[1]
         return None
 
     @property
@@ -213,10 +213,13 @@ class Executable(RegistryMixin):
         if self.envars is not None:
             env = {}
             for line in self.envars.split("\n"):
-                if line.startswith("export"):
-                    line = line.split("#")[0].strip()  # Remove comments
-                    line = line[7:]  # Remove 'export ' prefix
-                    key, value = line.split("=", 1)
+                line = line.strip()
+                parts = line.split(None, 1)
+                if parts and parts[0] == "export":
+                    if len(parts) == 1 or "=" not in parts[1]:
+                        continue  # A bare export does not define a new value.
+                    assignment = parts[1].split("#")[0].strip()
+                    key, value = assignment.split("=", 1)
                     env[key] = value
             return env
         return None

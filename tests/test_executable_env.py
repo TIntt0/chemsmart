@@ -18,3 +18,16 @@ def test_environment_value_with_equals_is_preserved():
     SLURMSubmitter._write_executable_configuration(stream, executable)
     assert 'export XTB_OPTIONS="mode=fast threads=1"\n' in stream.getvalue()
     assert "export EMPTY=\n" in stream.getvalue()
+
+
+def test_scratch_path_preserves_equals_sign():
+    executable = XTBExecutable(envars="export SCRATCH=/scratch/project=abc\n")
+    assert executable.scratch_dir == "/scratch/project=abc"
+
+
+def test_environment_recognises_export_keyword_and_whitespace():
+    executable = XTBExecutable(
+        envars="  export FIRST=one\nexport\tSECOND=two=three\n"
+        "exported=ignored\nexport EXISTING\nexport\n"
+    )
+    assert executable.env == {"FIRST": "one", "SECOND": "two=three"}
