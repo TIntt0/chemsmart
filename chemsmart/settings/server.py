@@ -560,27 +560,25 @@ class Server(RegistryMixin):
         Check if the job is already running or queued.
 
         Prevents duplicate job submissions by checking the scheduler queue
-        for jobs with the same label.
+        for jobs with the same program and label.
 
         Args:
             job: Job instance to check.
         """
-        from chemsmart.jobs.gaussian import GaussianJob
         from chemsmart.utils.cluster import ClusterHelper
 
-        if not isinstance(job, GaussianJob) or job.label is None:
+        if job.label is None:
             return
 
         cluster_helper = ClusterHelper()
-        running_job_ids, running_job_names = (
-            cluster_helper.get_gaussian_running_jobs()
-        )
+        running_job_ids, running_job_names = cluster_helper.get_running_jobs()
 
-        if job.label in running_job_names:
+        if job.execution_name in running_job_names:
             logger.info(
-                f"Warning: submitting job with duplicate name: {job.label}"
+                "Warning: submitting job with duplicate name: "
+                f"{job.execution_name}"
             )
-            sys.exit(f"Duplicate job NOT submitted: {job.label}")
+            sys.exit(f"Duplicate job NOT submitted: {job.execution_name}")
 
     def _write_submission_script(self, job, cli_args, **kwargs):
         """
@@ -626,7 +624,7 @@ class Server(RegistryMixin):
             # Use shell=True if the command has shell operators
             p = subprocess.Popen(command, shell=True)
         else:
-            p = subprocess.Popen(shlex.split(command), cwd=job.folder)
+            p = subprocess.Popen(shlex.split(command))
         return p.wait()
 
     def submit_array_job(
@@ -690,7 +688,7 @@ class Server(RegistryMixin):
             # Use shell=True if the command has shell operators
             p = subprocess.Popen(command, shell=True)
         else:
-            p = subprocess.Popen(shlex.split(command), cwd=job.folder)
+            p = subprocess.Popen(shlex.split(command))
         return p.wait()
 
 

@@ -1,3 +1,5 @@
+from chemsmart.cli.convert import convert
+from chemsmart.cli.crest import crest
 from chemsmart.cli.database import database
 from chemsmart.cli.gaussian import gaussian
 from chemsmart.cli.grouper import grouper
@@ -6,15 +8,21 @@ from chemsmart.cli.mol import mol
 from chemsmart.cli.nciplot import nciplot
 from chemsmart.cli.orca import orca
 from chemsmart.cli.pka import pka
+from chemsmart.cli.sterimol import sterimol
 from chemsmart.cli.thermochemistry import thermochemistry
+from chemsmart.cli.xtb import xtb
 
 subcommands = [
+    convert,
+    crest,
     gaussian,
     grouper,
     orca,
+    xtb,
     pka,
     mol,
     nciplot,
+    sterimol,
     thermochemistry,
     database,
     iterate,

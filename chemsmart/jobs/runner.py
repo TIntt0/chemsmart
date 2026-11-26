@@ -49,7 +49,7 @@ def _resolve_scratch(scratch, runner_cls, server):
     1. Explicit CLI/API ``scratch`` (``True``/``False``) wins.
     2. If omitted (``None``), use program-block ``SCRATCH`` from server YAML
        when that key is set and the runner maps to an ``Executable`` subclass
-       (Gaussian, ORCA, or NCIPLOT).
+       (for example Gaussian, ORCA, xTB, or NCIPLOT).
     3. If the YAML key is absent or the program has no executable config,
        use the runner class ``SCRATCH`` default.
     """
@@ -290,8 +290,8 @@ class JobRunner(RegistryMixin):
         3. ``server.scratch_dir`` (``SERVER.SCRATCH_DIR``)
         4. User settings ``SCRATCH``
 
-        If no path can be resolved, scratch mode is disabled with a warning.
-        If a path is resolved but does not exist, raises ``FileNotFoundError``.
+        If no path can be resolved, or the resolved path is missing or not a
+        directory, scratch mode is disabled with a warning.
         """
         if self._scratch_dir is not None:
             return self._scratch_dir  # Use explicitly set directory
@@ -321,12 +321,14 @@ class JobRunner(RegistryMixin):
             )
             self.scratch = False
         else:
-            # check that the scratch folder exists
             scratch_dir = os.path.expanduser(scratch_dir)
-            if not os.path.exists(scratch_dir):
-                raise FileNotFoundError(
-                    f"Specified scratch dir does not exist: {scratch_dir}"
+            if not os.path.isdir(scratch_dir):
+                logger.warning(
+                    f"Scratch dir {scratch_dir!r} is missing or not a "
+                    f"directory for {self}. Not using scratch."
                 )
+                self.scratch = False
+                scratch_dir = None
         return scratch_dir
 
     def __repr__(self):
@@ -448,7 +450,7 @@ class JobRunner(RegistryMixin):
         ``scratch`` arrives as ``None``. It is resolved here, in order:
 
         1. Explicit ``True``/``False`` from ``--scratch`` or ``--no-scratch``
-        2. Program ``SCRATCH`` in server YAML (Gaussian, ORCA, NCIPLOT only)
+        2. Program ``SCRATCH`` in server YAML for executable-backed runners
         3. The selected runner's class ``SCRATCH`` default
 
         The typed runner is then constructed with that resolved ``bool``.

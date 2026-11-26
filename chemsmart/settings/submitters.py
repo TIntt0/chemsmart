@@ -1,12 +1,17 @@
 import inspect
 import logging
+import os
+import shlex
+import sys
 from abc import abstractmethod
 from typing import Optional
 
 from chemsmart.settings.executable import (
+    CRESTExecutable,
     GaussianExecutable,
     NCIPLOTExecutable,
     ORCAExecutable,
+    XTBExecutable,
 )
 from chemsmart.settings.user import CHEMSMARTUserSettings
 from chemsmart.utils.mixins import RegistryMixin
@@ -15,6 +20,9 @@ user_settings = CHEMSMARTUserSettings()
 
 
 logger = logging.getLogger(__name__)
+
+# These jobs run in Python, so server.yaml has no program section for them
+PYTHON_PROGRAMS = ("grouper", "iterate", "sterimol", "thermochemistry")
 
 
 class RunScript:
@@ -214,7 +222,7 @@ class Submitter(RegistryMixin):
             str: Filename for the job submission script.
         """
         if self.job.label is not None:
-            return f"chemsmart_sub_{self.job.label}.sh"
+            return f"chemsmart_sub_{self.job.execution_name}.sh"
         return "chemsmart_sub.sh"
 
     @property
@@ -226,7 +234,7 @@ class Submitter(RegistryMixin):
             str: Filename for the array job submission script.
         """
         if self.job.label is not None:
-            return f"chemsmart_sub_array_{self.job.label}.sh"
+            return f"chemsmart_sub_array_{self.job.execution_name}.sh"
         return "chemsmart_sub_array.sh"
 
     @property
@@ -238,7 +246,7 @@ class Submitter(RegistryMixin):
             str: Filename for the job execution script.
         """
         if self.job.label is not None:
-            return f"chemsmart_run_{self.job.label}.py"
+            return f"chemsmart_run_{self.job.execution_name}.py"
         return "chemsmart_run.py"
 
     @property
@@ -247,9 +255,10 @@ class Submitter(RegistryMixin):
         Get the executable configuration for the job's program.
 
         Returns:
-            Executable: Instance of the appropriate executable handler
-            (GaussianExecutable, ORCAExecutable, or NCIPLOTExecutable)
-            based on `job.PROGRAM`.
+            Executable | None: Instance of the appropriate executable handler
+            (GaussianExecutable, ORCAExecutable, XTBExecutable, or
+            NCIPLOTExecutable)
+            based on `job.PROGRAM`, or None for a job that runs in Python.
 
         Raises:
             ValueError: If the job's program is not supported.
@@ -258,9 +267,14 @@ class Submitter(RegistryMixin):
             executable = GaussianExecutable.from_servername(self.server.name)
         elif self.job.PROGRAM.lower() == "orca":
             executable = ORCAExecutable.from_servername(self.server.name)
+        elif self.job.PROGRAM.lower() == "xtb":
+            executable = XTBExecutable.from_servername(self.server.name)
+        elif self.job.PROGRAM.lower() == "crest":
+            executable = CRESTExecutable.from_servername(self.server.name)
         elif self.job.PROGRAM.lower() == "nciplot":
             executable = NCIPLOTExecutable.from_servername(self.server.name)
-
+        elif self.job.PROGRAM.lower() in PYTHON_PROGRAMS:
+            executable = None
         else:
             # Need to add programs here to be
             # supported for other types of programs
@@ -319,6 +333,9 @@ class Submitter(RegistryMixin):
                 - a sequence (e.g., list or tuple) of per-job argument lists,
                   where ``cli_args[i]`` contains the args for ``jobs[i]``.
         """
+        prefix = (
+            f"{self.job.execution_name}_" if self.job.label is not None else ""
+        )
         for i, job in enumerate(jobs):
             # Determine CLI args for this specific job/index.
             # If cli_args looks like a per-job sequence (same length as jobs and
@@ -333,8 +350,8 @@ class Submitter(RegistryMixin):
 
             # Create a run script for each job using a 0-based index so the
             # filenames align with scheduler array task IDs and task-based
-            # execution of chemsmart_run_array_${TASK_ID}.py.
-            runscript_name = f"chemsmart_run_array_{i}.py"
+            # execution of the corresponding array run script.
+            runscript_name = f"chemsmart_run_array_{prefix}{i}.py"
             runscript = RunScript(runscript_name, job_cli_args)
             logger.debug(f"Writing array run script {i}: {runscript_name}")
             runscript.write()
@@ -395,7 +412,10 @@ class Submitter(RegistryMixin):
         )
         f.write("  exit 1\n")
         f.write("fi\n\n")
-        f.write("python chemsmart_run_array_${TASK_ID}.py\n")
+        prefix = (
+            f"{self.job.execution_name}_" if self.job.label is not None else ""
+        )
+        f.write(f"python chemsmart_run_array_{prefix}${{TASK_ID}}.py\n")
 
     def _write_runscript(self, cli_args):
         """
@@ -464,10 +484,29 @@ class Submitter(RegistryMixin):
         Args:
             f: File handle for writing program-specific setup.
         """
+        if self.executable is None:
+            self._write_python_environment(f)
+            return
         self._write_program_specific_conda_env(f)
         self._write_load_program_specific_modules(f)
         self._write_source_program_specific_script(f)
         self._write_program_specific_environment_variables(f)
+
+    @staticmethod
+    def _write_python_environment(f):
+        """
+        Make the run script find the Python that submitted the job.
+
+        A job without an executable has no conda environment configured in
+        server.yaml, and not every scheduler passes on the submitting shell's
+        environment. PBS, for example, does not by default.
+
+        Args:
+            f: File handle for writing the environment setup.
+        """
+        python_dir = shlex.quote(os.path.dirname(sys.executable))
+        f.write("# python environment\n")
+        f.write(f"export PATH={python_dir}:$PATH\n\n")
 
     def _write_program_specific_conda_env(self, f):
         """
@@ -598,14 +637,16 @@ class Submitter(RegistryMixin):
         Write the final job execution commands.
 
         Makes the run script executable and executes it in the background,
-        then waits for completion.
+        then waits for it. Waiting for that process gives the script its exit
+        status, so that the scheduler sees a failed job; a bare ``wait`` always
+        succeeds.
 
         Args:
             f: File handle for writing job execution commands.
         """
         f.write(f"chmod +x ./{self.run_script}\n")
         f.write(f"./{self.run_script} &\n")
-        f.write("wait\n")
+        f.write('wait "$!"\n')
 
     @classmethod
     def from_scheduler_type(cls, scheduler_type, **kwargs):
@@ -680,6 +721,7 @@ class PBSSubmitter(Submitter):
         Args:
             f: File handle for writing PBS directives.
         """
+        f.write(f"#PBS -N {self.job.execution_name}\n")
         f.write(f"#PBS -o {self.job.label}.pbsout\n")
         f.write(f"#PBS -e {self.job.label}.pbserr\n")
         if self.server.num_gpus > 0:
@@ -758,7 +800,7 @@ class SLURMSubmitter(Submitter):
         Args:
             f: File handle for writing SLURM directives.
         """
-        f.write(f"#SBATCH --job-name={self.job.label}\n")
+        f.write(f"#SBATCH --job-name={self.job.execution_name}\n")
         f.write(f"#SBATCH --output={self.job.label}.slurmout\n")
         f.write(f"#SBATCH --error={self.job.label}.slurmerr\n")
         if self.server.num_gpus:
@@ -801,14 +843,14 @@ class SLURMSubmitter(Submitter):
         # Get number of jobs in array
         num_jobs = len(self.jobs) if hasattr(self, "jobs") else 1
 
-        f.write(f"#SBATCH --job-name={self.job.label}_array\n")
+        f.write(f"#SBATCH --job-name={self.job.execution_name}_array\n")
         f.write(f"#SBATCH --output={self.job.label}_array_%a.slurmout\n")
         f.write(f"#SBATCH --error={self.job.label}_array_%a.slurmerr\n")
 
         # Array directive: 1 to num_jobs, optionally throttled so that at
         # most num_nodes tasks run concurrently (useful for resource limits).
         # This matches the 1-based array runscript filenames
-        # (for example, chemsmart_run_array_1.py ... chemsmart_run_array_N.py).
+        # written by _write_array_runscripts().
         if num_nodes is not None:
             f.write(f"#SBATCH --array=1-{num_jobs}%{num_nodes}\n")
         else:
@@ -891,7 +933,7 @@ class SLFSubmitter(Submitter):
         Args:
             f: File handle for writing LSF directives.
         """
-        f.write(f"#BSUB -J {self.job.label}\n")
+        f.write(f"#BSUB -J {self.job.execution_name}\n")
         f.write(f"#BSUB -o {self.job.label}.bsubout\n")
         f.write(f"#BSUB -e {self.job.label}.bsuberr\n")
         if user_settings is not None:

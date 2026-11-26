@@ -77,6 +77,35 @@ Standard XYZ format for atomic coordinates:
 
    XYZ files do not contain charge or multiplicity information. You must specify these using ``-c`` and ``-m`` flags.
 
+NumPy Archives (.npz)
+---------------------
+
+The supported dataset layouts are DGL QM9 (``R``, ``Z``, ``N``) and official revQM9 (``coords``, ``charges``, optionally
+``elements``). In revQM9, ``charges`` are atomic numbers, not partial charges. If additional element identities are
+provided, they must agree. Coordinates must be in Angstrom.
+
+Dataset downloads:
+
+-  `qm9_eV.npz <https://data.dgl.ai/dataset/qm9_eV.npz>`_ (download hosted by DGL).
+-  `revQM9.npz <https://zenodo.org/records/10689884>`_ (dataset authors' Zenodo page).
+
+.. code:: bash
+
+   chemsmart sub -s server gaussian -p project -f revQM9.npz -i 1 -c 0 -m 1 opt
+
+The reader imports atomic species and coordinates. revQM9's total energy is assigned to ``molecule.energy``, in Hartree.
+DGL QM9's ``U0`` is assigned to ``molecule.U0`` because it is an atom-reference-adjusted 0 K energy, rather than the
+total molecular energy represented by ``molecule.energy``. For the supported QM9 and revQM9 layouts, the molecule read
+from the file has charge 0 and multiplicity 1, but job commands still require ``-c`` and ``-m``. The Python API defaults
+to the last structure. Other NPZ schemas and zero padding are not supported. Object arrays are read using restricted
+NumPy reconstruction.
+
+Supported per-molecule dataset properties are available as ``molecule.homo``, ``molecule.lumo``, and similar attributes,
+using original field names and values without unit conversion. ``molecule.dataset_source`` identifies the detected
+layout, not verified provenance. The ``atomization_test`` array in revQM9 has a different length from the structure
+arrays and is not imported. The NPZ database import preserves supported per-molecule properties; specify ``--dataset``
+to declare their source and units.
+
 SDF Files
 ---------
 
@@ -165,6 +194,55 @@ calculation directory must contain exactly one xTB main output.
 
    chemsmart sub -s server gaussian -p project -f co2_ohess/co2_ohess.out sp
 
+CREST Files
+===========
+
+A CREST calculation writes its results to a **directory** (containing ``crest_conformers.xyz``, ``crest.energies``,
+``crest_dynamics.trj``, and other auxiliary files).
+
+CREST Ensemble XYZ Files
+------------------------
+
+These are standard single- or multi-frame XYZ files and can be passed directly with ``-f``: ``crest_best.xyz`` is the
+lowest-energy conformer (a single structure) and the usual starting point for follow-up DFT jobs;
+``crest_conformers.xyz`` is the conformer ensemble sorted by energy, for conformational sampling; and
+``crest_rotamers.xyz`` is the rotamer ensemble, for cases where rotamers rather than only conformers are needed as
+geometry input.
+
+.. code:: bash
+
+   # Using Gaussian via the gaussian subcommand: Optimization on CREST best conformer
+   chemsmart sub -s server gaussian -p project -f crest_best.xyz -c 0 -m 1 opt
+
+   # Using Gaussian via the gaussian subcommand: TS optimization on CREST conformer ensemble
+   chemsmart sub -s server gaussian -p project -f crest_conformers.xyz -c 0 -m 1 crest -j ts
+
+   # Using ORCA via the orca subcommand: Single-point calculation on a selected CREST rotamer
+   chemsmart sub -s server orca -p project -f crest_rotamers.xyz -i 3 -c 0 -m 1 opt
+
+   # Visualize an ensemble
+   chemsmart run mol -f crest_conformers.xyz -i ':' visualize
+   chemsmart run mol -f crest_rotamers.xyz -i ':' visualize
+
+CREST Dynamics Trajectory File
+------------------------------
+
+CREST MD trajectories are saved as ``crest_dynamics.trj``. The trajectory can be inspected with:
+
+.. code:: bash
+
+   chemsmart run mol -f crest_dynamics.trj -i ':' visualize
+
+CREST Optimization Log File
+---------------------------
+
+CREST geometry-optimization intermediates are written to ``crestopt.log``. The optimization trajectory can be inspected
+with:
+
+.. code:: bash
+
+   chemsmart run mol -f crestopt.log -i ':' visualize
+
 ChemDraw Files
 ==============
 
@@ -200,11 +278,17 @@ with aromatic ligands such as Cp, Cp\*, and benzene rings.
 .. note::
 
    -  Both binary (``.cdx``) and XML-based (``.cdxml``) ChemDraw formats are supported.
+
    -  RDKit is used internally to parse ChemDraw files and generate 3D coordinates.
-   -  For multi-molecule ChemDraw files, use ``-i`` to select a specific molecule.
+
+   -  For multi-molecule ChemDraw files, use ``-i`` to select a specific molecule when submitting jobs.
+
    -  3D coordinates are automatically generated from 2D structures.
-   -  Reading binary ``.cdx`` files requires Open Babel (``obabel``) to be installed. If Open Babel is not available,
-      save the file as ``.cdxml`` instead.
+
+   -  Reading binary ``.cdx`` files requires the Open Babel **CLI** (``obabel`` on ``PATH``) when RDKit cannot parse the
+      file. This is separate from the Python ``openbabel`` / ``pybel`` bindings used for generic format conversion. If
+      ``obabel`` is not available, save the file as ``.cdxml`` instead.
+
    -  Charge and multiplicity of organometallic complexes are **not** inferred from the ChemDraw file – always specify
       ``-c`` and ``-m`` explicitly.
 
@@ -214,6 +298,16 @@ with aromatic ligands such as Cp, Cp\*, and benzene rings.
 
    # Select the 2nd molecule from a ChemDraw file with multiple structures
    chemsmart sub -s server gaussian -p project -f molecules.cdxml -i 2 -c 0 -m 1 opt
+
+.. warning::
+
+   **Converting multi-fragment ChemDraw files:** by default, ``chemsmart run convert`` (and ``FileConverter``) writes
+   only the **last** molecule, consistent with other multi-structure formats. To emit every fragment as numbered files
+   (``basename_1.ext``, ``basename_2.ext``, …), pass ``-z`` / ``--include-intermediate-structures``:
+
+   .. code:: bash
+
+      chemsmart run convert -i two_molecules.cdxml -o two_molecules.xyz -z
 
 For full details on organometallic complex support and its restrictions, see :doc:`chemdraw-organometallic`.
 
@@ -393,6 +487,12 @@ For multi-structure files, use ``-i`` to select a specific structure:
    # Use 1-based indexing
    chemsmart sub -s server gaussian -p project -f scan.log -i 15 sp
 
+When submitting multiple selected structures from an NPZ or multi-frame XYZ file to xTB, Gaussian, or ORCA, CHEMSMART
+writes a separate XYZ input for each job. Keep the generated ``chemsmart_inputs_*`` directory accessible to the compute
+nodes until all submitted jobs finish. For example, ``-i ':'`` selects all structures in the file.
+
+For multi-structure submission from other file formats, first convert the structures to a multi-frame XYZ file.
+
 .. warning::
 
    CHEMSMART uses **1-based indexing** to match most molecular visualization software, unlike Python's 0-based indexing.
@@ -419,7 +519,22 @@ CHEMSMART automatically detects file formats based on extensions:
    file header. If detection fails, an error will be raised indicating the unsupported format. For xTB, the ``.out``
    file is resolved to its parent calculation directory so that the associated output files can be read.
 
-For unsupported extensions, CHEMSMART falls back to ASE's file reading capabilities.
+For unsupported extensions, CHEMSMART first tries Open Babel (preferred for molecular formats such as ``.mol2``,
+``.smi``, ``.cml``, ``.mol``). If Open Babel cannot read the file, CHEMSMART falls back to ASE. Periodic / ASE-specific
+extensions (``.traj``, ``.cif``, ``.cfg``, ``.db``, VASP/POSCAR, ``.gen``, ``.castep``, ``.xsf``, ``.extxyz``, …) skip
+Open Babel and go straight to ASE, because Open Babel either cannot read them or silently drops cell / PBC information.
+
+Directory batch conversion (``--directory`` + ``--filetype``) still uses a fixed whitelist (``log``, ``com``, ``gjf``,
+``out``, ``inp``, ``xyz``, ``sdf``, ``pdb``, ``cdxml``, ``cdx``). Formats such as ``.mol2`` / ``.smi`` are available via
+single-file convert (``-i`` / ``-o``) only. See :doc:`convert-cli-options` for convert CLI options and output formats.
+
+.. note::
+
+   **Open Babel read limits:** the Open Babel → ``Molecule`` path round-trips geometry through XYZ, so bond orders,
+   residue metadata, and atom typing are **not** preserved. Non-zero formal charge and spin multiplicity are taken from
+   Open Babel when available; neutral charge is left as ``None``. Zero-dimensional inputs (e.g. SMILES) are expanded
+   with Open Babel ``make3D()`` — coordinates are a force-field guess, not experimental geometry. If ``make3D`` fails,
+   CHEMSMART logs a warning and may still return a molecule with incomplete 3D coordinates.
 
 **********
  See Also
@@ -427,7 +542,10 @@ For unsupported extensions, CHEMSMART falls back to ASE's file reading capabilit
 
 -  :doc:`gaussian-cli-options`
 -  :doc:`orca-cli-options`
+-  :doc:`xtb-cli-options`
+-  :doc:`crest-cli-options`
 -  :doc:`pymol-cli-options`
+-  :doc:`convert-cli-options`
 -  :doc:`database-workflow`
 -  :doc:`cli-overview`
 

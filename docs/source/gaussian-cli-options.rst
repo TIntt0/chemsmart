@@ -58,20 +58,20 @@ Project and File Options
 
    -  -  ``--ri, --record-index``
       -  int
-      -  Select a record from a chemsmart database by its 1-based index
+      -  Select a record from a CHEMSMART database by its 1-based index
 
    -  -  ``--rid, --record-id``
       -  string
-      -  Select a record from a chemsmart database by its ID
+      -  Select a record from a CHEMSMART database by its ID
 
    -  -  ``--sid, --structure-id``
       -  string
-      -  Select a structure from a chemsmart database by its ID
+      -  Select a structure from a CHEMSMART database by its ID
 
 .. note::
 
    -  ``-p`` uses the project name without the ``.yaml`` extension.
-   -  ``-f`` accepts various formats: ``.xyz``, ``.com``, ``.gjf``, ``.log``, ``.inp``, ``.out``, or a chemsmart
+   -  ``-f`` accepts various formats: ``.xyz``, ``.com``, ``.gjf``, ``.log``, ``.inp``, ``.out``, or a CHEMSMART
       database ``.db`` file.
 
 Specifying Output Filenames
@@ -354,6 +354,8 @@ Transition State Search
       -  Intrinsic reaction coordinate calculations
    -  -  ``scan``
       -  Potential energy surface scanning
+   -  -  ``qrc``
+      -  Quick reaction coordinate calculations
 
 Electronic Structure Properties
 ===============================
@@ -393,6 +395,12 @@ Other Jobs
    -  -  ``userjob``
       -  Custom user-defined jobs
 
+QM/MM
+=====
+
+``qmmm`` is nested under a parent job type. Use ``<JOBTYPE> qmmm`` where ``<JOBTYPE>`` is ``opt``, ``ts``, ``sp``,
+``scan``, ``modred``, or ``qrc``. There is no standalone ``qmmm`` command. See :doc:`gaussian-qmmm-jobs`.
+
 ************
  Next Steps
 ************
@@ -405,3 +413,4 @@ For detailed information on each job type:
 -  :doc:`gaussian-qrc`
 -  :doc:`gaussian-electronic-structure`
 -  :doc:`gaussian-other-jobs`
+-  :doc:`gaussian-qmmm-jobs`

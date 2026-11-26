@@ -6,6 +6,7 @@ data structures, text processing, and system operations. Includes
 specialized decorators for function caching and ordered set implementation.
 """
 
+import ast
 import copy
 import hashlib
 import logging
@@ -278,27 +279,115 @@ def write_list_of_lists_as_a_string_with_empty_line_between_lists(
 
 def get_list_from_string_range(string_of_range):
     """
-    Use 1-indexed.
-    See chemsmart/tests/GaussianUtilsTest.py::
-    GetListFromStringRangeTest::test_get_list_from_string_range
-    :param string_of_range: accepts string of range.
-    e.g., s='[1-3,28-31,34-41]' or s='1-3,28-31,34-41'
-    :return: list of range.
-    """
-    if "[" in string_of_range:
-        string_of_range = string_of_range.replace("[", "")
-        string_of_range = string_of_range.replace("]", "")
+    Parse 1-indexed index ranges from a string.
 
-    string_ranges = string_of_range.split(",")
+    Accepts hyphen or colon ranges, comma or whitespace separators,
+    optional square brackets, and Unicode dashes.
+
+    Examples:
+        ``'1-3,28-31,34-41'``
+        ``'[1-3,28-31,34-41]'``
+        ``'1:15 20'``
+        ``'397–469'``
+
+    Args:
+        string_of_range: Range specification string.
+
+    Returns:
+        list: 1-indexed integer indices.
+
+    Raises:
+        ValueError: If the string is empty or contains an invalid token.
+    """
+    if string_of_range is None:
+        raise ValueError(
+            "Could not parse atom indices from None. "
+            "Pass a range such as '1-10,15' or '1:10 15'."
+        )
+    if not isinstance(string_of_range, str):
+        raise TypeError(
+            "Expected a string of index ranges, "
+            f"got {type(string_of_range).__name__}."
+        )
+
+    original = string_of_range
+    text = string_of_range.strip()
+    for dash in ("\u2013", "\u2014", "\u2212"):
+        text = text.replace(dash, "-")
+    text = text.replace("[", "").replace("]", "")
+    text = re.sub(r"\s*-\s*", "-", text)
+    text = re.sub(r"\s*:\s*", ":", text)
+
+    if not text:
+        raise ValueError(
+            "Could not parse atom indices from an empty string. "
+            "Pass a range such as '1-10,15' or '1:10 15'."
+        )
+
     indices = []
-    for s in string_ranges:
-        if "-" in s:
-            each_range = s.split("-")
-            for i in range(int(each_range[0]), int(each_range[1]) + 1):
-                indices.append(i)
-        else:
-            indices.append(int(s))
+    for token in re.split(r"[,\s]+", text):
+        if not token:
+            continue
+        try:
+            if ":" in token:
+                start_s, end_s = token.split(":", 1)
+                start, end = int(start_s), int(end_s)
+                if start <= 0 or end <= 0 or start > end:
+                    raise ValueError(
+                        f"Invalid atom index range {token!r}. "
+                        "Expected 1-indexed ranges such as '1-10,15' or '1:10 15'."
+                    )
+                indices.extend(range(start, end + 1))
+            elif "-" in token and not token.startswith("-"):
+                start_s, end_s = token.split("-", 1)
+                start, end = int(start_s), int(end_s)
+                if start <= 0 or end <= 0 or start > end:
+                    raise ValueError(
+                        f"Invalid atom index range {token!r}. "
+                        "Expected 1-indexed ranges such as '1-10,15' or '1:10 15'."
+                    )
+                indices.extend(range(start, end + 1))
+            else:
+                value = int(token)
+                if value <= 0:
+                    raise ValueError(
+                        f"Invalid atom index {token!r}. "
+                        "Expected 1-indexed indices such as '1,15' or '15'."
+                    )
+                indices.append(value)
+        except ValueError:
+            raise ValueError(
+                f"Invalid atom index token {token!r} in {original!r}. "
+                "Expected 1-indexed ranges such as '1-10,15' or '1:10 15'."
+            ) from None
+
+    if not indices:
+        raise ValueError(
+            f"Could not parse atom indices from {original!r}. "
+            "Pass a range such as '1-10,15' or '1:10 15'."
+        )
     return indices
+
+
+def parse_qmmm_scale_factors(scale_factors):
+    """Parse QM/MM scale factors to ``{(atom1, atom2): [factors, ...]}``.
+
+    String input may use list or tuple keys, e.g. ``'{[3, 4]: [0.709]}'``.
+    """
+    if isinstance(scale_factors, str):
+        tree = ast.parse(scale_factors, mode="eval")
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Dict):
+                node.keys = [
+                    (
+                        ast.Tuple(elts=key.elts, ctx=key.ctx)
+                        if isinstance(key, ast.List)
+                        else key
+                    )
+                    for key in node.keys
+                ]
+        return ast.literal_eval(tree)
+    return scale_factors
 
 
 def convert_list_to_gaussian_frozen_list(list_of_indices, molecule):
@@ -1043,40 +1132,27 @@ def return_objects_and_indices_from_string_index(list_of_objects, index):
     """
     # convert index from 1-based (user input) to 0-based (python code-needed)
     index_0based = convert_string_index_from_1_based_to_0_based(index)
+    total = len(list_of_objects)
+
+    def _to_1based(i):
+        # Resolve a negative 0-based index against the list length, as
+        # Python indexing does, so the reported position is the real one.
+        return (i + total if i < 0 else i) + 1
 
     if isinstance(index_0based, list):
         # if index is a list, use it to select objects
         objects = [list_of_objects[i] for i in index_0based]
-        # Convert back to 1-based for tracking
-        indices_1based = [i + 1 for i in index_0based]
+        indices_1based = [_to_1based(i) for i in index_0based]
     elif isinstance(index_0based, int):
         # if index is a single integer, use it to select a single object
         objects = list_of_objects[index_0based]
-        # Handle negative indices: convert to
-        # positive 0-based first, then to 1-based
-        if index_0based < 0:
-            indices_1based = len(list_of_objects) + index_0based + 1
-        else:
-            indices_1based = index_0based + 1
+        indices_1based = _to_1based(index_0based)
     else:
-        # index is a Slice
+        # index is a slice: slice.indices() resolves negative, missing and
+        # out-of-range bounds exactly as slicing does, so the indices
+        # always correspond one-to-one with the selected objects.
         objects = list_of_objects[index_0based]
-        # Convert slice to list of indices
-        if isinstance(objects, list):
-            # Figure out which indices were actually selected
-            start = index_0based.start if index_0based.start is not None else 0
-            stop = (
-                index_0based.stop
-                if index_0based.stop is not None
-                else len(list_of_objects)
-            )
-            step = index_0based.step if index_0based.step is not None else 1
-            indices_0based = list(range(start, stop, step))
-            indices_1based = [i + 1 for i in indices_0based]
-        else:
-            # Single object from slice
-            start = index_0based.start if index_0based.start is not None else 0
-            indices_1based = start + 1
+        indices_1based = [i + 1 for i in range(*index_0based.indices(total))]
 
     return objects, indices_1based
 

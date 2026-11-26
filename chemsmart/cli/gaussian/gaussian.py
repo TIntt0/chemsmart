@@ -703,6 +703,7 @@ def gaussian(
 
     # obtain molecule structure
     molecules = None
+    molecule_indices = None
 
     # Skip molecule loading for pKa table files (handled by pKa batch)
     if is_pka_table_input:
@@ -746,8 +747,8 @@ def gaussian(
                 f"Obtained database molecule {molecules} from {filename}"
             )
         else:
-            molecules = Molecule.from_filepath(
-                filepath=filename, index=":", return_list=True
+            molecules, molecule_indices = Molecule.from_filepath_with_indices(
+                filepath=filename, index=index
             )
             assert (
                 molecules is not None
@@ -780,7 +781,10 @@ def gaussian(
                 label = f"{label}_RI-{record_index}"
         label = f"{label}_{append_label}"
     if label is None and append_label is None:
-        label = os.path.splitext(os.path.basename(filename))[0]
+        if filename:
+            label = os.path.splitext(os.path.basename(filename))[0]
+        else:
+            label = "output"
         if is_chemsmart_db:
             if structure_id is not None:
                 label = f"{label}_SID-{structure_id}"
@@ -788,18 +792,12 @@ def gaussian(
                 label = f"{label}_RID-{record_id}"
             elif record_index is not None:
                 label = f"{label}_RI-{record_index}"
-        if filename:
-            label = os.path.splitext(os.path.basename(filename))[0]
-        else:
-            label = "output"
-        if ctx.invoked_subcommand:
-            label = f"{label}_{ctx.invoked_subcommand}"
+        label = f"{label}_{ctx.invoked_subcommand}"
     label = clean_label(label)
 
     # if user has specified an index to use to access particular structure
     # then return that structure as a list and track the original indices
-    molecule_indices = None
-    if index is not None and not is_chemsmart_db:
+    if index is not None and not filename and not is_chemsmart_db:
         molecules, molecule_indices = (
             return_objects_and_indices_from_string_index(
                 list_of_objects=molecules, index=index

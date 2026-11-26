@@ -553,6 +553,11 @@ def orca(
     elif filename.endswith(".xyz"):
         job_settings = ORCAJobSettings.default()
         logger.info(f"Using default ORCA settings for XYZ file: {filename}")
+    elif filename.lower().endswith(".npz"):
+        job_settings = ORCAJobSettings.default()
+        logger.info(
+            f"Using default ORCA settings for geometry file: {filename}"
+        )
     elif filename.endswith(".db"):
         if is_chemsmart_db:
             job_settings = ORCAJobSettings.from_database(
@@ -676,6 +681,7 @@ def orca(
 
     # obtain molecule structure from file or PubChem
     molecules = None
+    molecule_indices = None
 
     # Skip molecule loading for pKa table/CDXML files (handled by pKa batch)
     if is_pka_table_input:
@@ -718,8 +724,8 @@ def orca(
                 f"Obtained database molecule {molecules} from {filename}"
             )
         else:
-            molecules = Molecule.from_filepath(
-                filepath=filename, index=":", return_list=True
+            molecules, molecule_indices = Molecule.from_filepath_with_indices(
+                filepath=filename, index=index
             )
             assert (
                 molecules is not None
@@ -751,13 +757,10 @@ def orca(
         label = f"{label}_{append_label}"
         logger.debug(f"Created label with append: {label}")
     if label is None and append_label is None:
-        label = os.path.splitext(os.path.basename(filename))[0]
         if filename:
             label = os.path.splitext(os.path.basename(filename))[0]
         else:
             label = "output"
-        if ctx.invoked_subcommand:
-            label = f"{label}_{ctx.invoked_subcommand}"
         if is_chemsmart_db:
             if structure_id is not None:
                 label = f"{label}_SID-{structure_id}"
@@ -772,8 +775,7 @@ def orca(
 
     # if user has specified an index to use to access particular structure
     # then return that structure as a list and track the original indices
-    molecule_indices = None
-    if index is not None and not is_chemsmart_db:
+    if index is not None and not filename and not is_chemsmart_db:
         molecules, molecule_indices = (
             return_objects_and_indices_from_string_index(
                 list_of_objects=molecules, index=index
